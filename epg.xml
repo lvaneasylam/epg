@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <tv>
 	<generator-info generator-info-name="Kim Gee Won" generator-info-url="https://github.com"></generator-info>
+	<channel id="CCTV1">
+		<display-name lang="zh">CCTV1</display-name>
+	</channel>
 	<channel id="myTV SUPER 18台">
 		<display-name lang="zh">myTV SUPER 18台</display-name>
 	</channel>
@@ -358,6 +361,142 @@
 	<channel id="SUPER單元劇">
 		<display-name lang="zh">SUPER單元劇</display-name>
 	</channel>
+	<programme start="20260227004300 +0800" stop="20260227012659 +0800" channel="CCTV1">
+		<title lang="zh">生活早参考-特别节目（生活圈）2026-52</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227012700 +0800" stop="20260227015719 +0800" channel="CCTV1">
+		<title lang="zh">晚间新闻</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227015720 +0800" stop="20260227022719 +0800" channel="CCTV1">
+		<title lang="zh">自然中国-地矿宝藏-追寻金脉</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227022720 +0800" stop="20260227023904 +0800" channel="CCTV1">
+		<title lang="zh">非遗里的中国（第四季）-精编1</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227023905 +0800" stop="20260227024324 +0800" channel="CCTV1">
+		<title lang="zh">非遗里的中国-MV</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227024325 +0800" stop="20260227025059 +0800" channel="CCTV1">
+		<title lang="zh">三餐四季（第二季）-宣传片</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227025100 +0800" stop="20260227041959 +0800" channel="CCTV1">
+		<title lang="zh">宗师列传·大宋词人传-李清照</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227042000 +0800" stop="20260227045259 +0800" channel="CCTV1">
+		<title lang="zh">绿水青山中国答卷-2</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227045300 +0800" stop="20260227052659 +0800" channel="CCTV1">
+		<title lang="zh">新闻联播</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227052700 +0800" stop="20260227055959 +0800" channel="CCTV1">
+		<title lang="zh">文脉春秋-2025-11</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227060000 +0800" stop="20260227083714 +0800" channel="CCTV1">
+		<title lang="zh">朝闻天下</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227083715 +0800" stop="20260227092659 +0800" channel="CCTV1">
+		<title lang="zh">生活早参考-特别节目（生活圈）2026-53</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227092700 +0800" stop="20260227101359 +0800" channel="CCTV1">
+		<title lang="zh">藏海传16/40</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227101400 +0800" stop="20260227110359 +0800" channel="CCTV1">
+		<title lang="zh">藏海传17/40</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227110400 +0800" stop="20260227115314 +0800" channel="CCTV1">
+		<title lang="zh">藏海传18/40</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227115315 +0800" stop="20260227115959 +0800" channel="CCTV1">
+		<title lang="zh">秘境之眼-2026-38</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227120000 +0800" stop="20260227123459 +0800" channel="CCTV1">
+		<title lang="zh">新闻30分</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227123500 +0800" stop="20260227133629 +0800" channel="CCTV1">
+		<title lang="zh">花开中国-北京篇（下）</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227133630 +0800" stop="20260227142444 +0800" channel="CCTV1">
+		<title lang="zh">生命树28/40</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227142445 +0800" stop="20260227151514 +0800" channel="CCTV1">
+		<title lang="zh">生命树29/40</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227151515 +0800" stop="20260227160414 +0800" channel="CCTV1">
+		<title lang="zh">生命树30/40</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227160415 +0800" stop="20260227165359 +0800" channel="CCTV1">
+		<title lang="zh">生命树31/40</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227165400 +0800" stop="20260227170859 +0800" channel="CCTV1">
+		<title lang="zh">第一动画乐园-2026-53</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227170900 +0800" stop="20260227171644 +0800" channel="CCTV1">
+		<title lang="zh">三餐四季（第二季）-宣传片</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227171645 +0800" stop="20260227184929 +0800" channel="CCTV1">
+		<title lang="zh">三餐四季（第三季）-2</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227184930 +0800" stop="20260227185959 +0800" channel="CCTV1">
+		<title lang="zh">秘境之眼-2026-52</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227190000 +0800" stop="20260227194009 +0800" channel="CCTV1">
+		<title lang="zh">新闻联播</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227194010 +0800" stop="20260227200124 +0800" channel="CCTV1">
+		<title lang="zh">焦点访谈</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227200125 +0800" stop="20260227200559 +0800" channel="CCTV1">
+		<title lang="zh">前情提要-好好的时光-9/40</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227200600 +0800" stop="20260227205829 +0800" channel="CCTV1">
+		<title lang="zh">好好的时光9/40</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227205830 +0800" stop="20260227210059 +0800" channel="CCTV1">
+		<title lang="zh">前情提要-好好的时光-10/40</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227210100 +0800" stop="20260227215959 +0800" channel="CCTV1">
+		<title lang="zh">好好的时光10/40</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227220000 +0800" stop="20260227223559 +0800" channel="CCTV1">
+		<title lang="zh">晚间新闻</title>
+		<desc lang="zh"></desc>
+	</programme>
+	<programme start="20260227223600 +0800" stop="20260227235900 +0800" channel="CCTV1">
+		<title lang="zh">宗师列传·大宋词人传-张孝祥</title>
+		<desc lang="zh"></desc>
+	</programme>
 	<programme start="20260225004500 +0800" stop="20260225005959 +0800" channel="myTV SUPER 18台">
 		<title lang="zh">晨操快靚正</title>
 		<desc lang="zh">各場參賽馬晨課片段, 配以精闢、扼要論述, 讓觀眾可於短時間了解馬匹態況。</desc>
