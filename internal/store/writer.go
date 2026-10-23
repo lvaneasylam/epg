@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// DeleteSourceData 删除某源的全部频道与节目（源被移除或同步前的全量替换）。
-// 采用多表 DELETE 一次性按 JOIN 清理节目，再清频道。
+// DeleteSourceData 删除某源的全部频道与节目（源被移除时调用；常规同步
+// 已改为 UPSERT + 差量清理，不再全删，历史节目得以保留）。
 func (s *Store) DeleteSourceData(ctx context.Context, source string) error {
 	if _, err := s.db.ExecContext(ctx,
 		`DELETE p FROM epg_programmes p
@@ -27,14 +27,12 @@ type ChannelInput struct {
 	Icon    string
 }
 
-// ReplaceSourceChannels 全量替换某源频道：删旧 → 批量插新 → 读回自增 id。
+// ReplaceSourceChannels 同步某源频道：UPSERT（id 稳定，历史节目才挂得住）+
+// 差量清理源里已消失的频道（连同其节目）。
 // 返回 xmltv_id -> 频道 id 映射，供节目写入阶段关联。
 // 源文件内同一 xmltv_id 重复出现时仅保留第一个（真实源数据存在此脏数据，撞 uk 需去重）。
 func (s *Store) ReplaceSourceChannels(ctx context.Context, source string, priority int,
 	channels []ChannelInput) (map[string]int64, error) {
-	if err := s.DeleteSourceData(ctx, source); err != nil {
-		return nil, fmt.Errorf("清理源 %s 旧数据失败: %w", source, err)
-	}
 	deduped := make([]ChannelInput, 0, len(channels))
 	seen := make(map[string]bool, len(channels))
 	for _, c := range channels {
@@ -48,6 +46,8 @@ func (s *Store) ReplaceSourceChannels(ctx context.Context, source string, priori
 		deduped = append(deduped, c)
 	}
 	channels = deduped
+
+	// 已有频道行 UPSERT：更新 name/icon/priority/updated_at，id 不变
 	now := time.Now()
 	const batch = 500
 	var sb strings.Builder
@@ -63,37 +63,89 @@ func (s *Store) ReplaceSourceChannels(ctx context.Context, source string, priori
 			sb.WriteString("(?,?,?,?,?,?)")
 			args = append(args, source, priority, c.XmltvID, c.Name, c.Icon, now)
 		}
+		sb.WriteString(` ON DUPLICATE KEY UPDATE
+			priority=VALUES(priority), name=VALUES(name), icon=VALUES(icon), updated_at=VALUES(updated_at)`)
 		if _, err := s.db.ExecContext(ctx, sb.String(), args...); err != nil {
 			return nil, fmt.Errorf("写入源 %s 频道失败: %w", source, err)
 		}
 	}
-	// 读回 id 建立映射（自增 id 无法随批量 INSERT 直接获取）
+
+	// 读回该源全部频道行，建映射并找出源里已消失的（连同节目删除）
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, xmltv_id FROM epg_channels WHERE source = ?`, source)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	m := make(map[string]int64, len(channels))
+	type existCh struct {
+		id  int64
+		xid string
+	}
+	var existing []existCh
 	for rows.Next() {
-		var id int64
-		var xid string
-		if err := rows.Scan(&id, &xid); err != nil {
+		var e existCh
+		if err := rows.Scan(&e.id, &e.xid); err != nil {
+			rows.Close()
 			return nil, err
 		}
-		m[strings.ToLower(xid)] = id // 键小写归一化，与去重口径一致
+		existing = append(existing, e)
 	}
-	return m, rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	m := make(map[string]int64, len(existing))
+	var vanishedIDs []int64
+	for _, e := range existing {
+		key := strings.ToLower(e.xid) // 键小写归一化，与去重口径一致
+		if seen[key] {
+			m[key] = e.id
+		} else {
+			vanishedIDs = append(vanishedIDs, e.id)
+		}
+	}
+	if err := s.deleteChannelsByID(ctx, vanishedIDs); err != nil {
+		return nil, fmt.Errorf("清理源 %s 消失频道失败: %w", source, err)
+	}
+	return m, nil
 }
 
-// InsertProgrammes 批量插入节目，INSERT IGNORE 依赖 uk_channel_start 去重。
+// deleteChannelsByID 删除频道行及其全部节目（id 分批）。
+func (s *Store) deleteChannelsByID(ctx context.Context, ids []int64) error {
+	const batch = 500
+	for start := 0; start < len(ids); start += batch {
+		end := min(start+batch, len(ids))
+		part := ids[start:end]
+		args := make([]any, 0, len(part))
+		ph := ""
+		for i, id := range part {
+			if i > 0 {
+				ph += ","
+			}
+			ph += "?"
+			args = append(args, id)
+		}
+		if _, err := s.db.ExecContext(ctx,
+			`DELETE FROM epg_programmes WHERE channel_id IN (`+ph+`)`, args...); err != nil {
+			return err
+		}
+		if _, err := s.db.ExecContext(ctx,
+			`DELETE FROM epg_channels WHERE id IN (`+ph+`)`, args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// InsertProgrammes 批量写入节目：uk_channel_start 冲突时更新内容
+// （历史数据保留策略下，同一节目多轮同步以源数据最新内容为准）。
 func (s *Store) InsertProgrammes(ctx context.Context, progs []Programme) error {
 	const batch = 500
 	var sb strings.Builder
 	for start := 0; start < len(progs); start += batch {
 		end := min(start+batch, len(progs))
 		sb.Reset()
-		sb.WriteString(`INSERT IGNORE INTO epg_programmes
+		sb.WriteString(`INSERT INTO epg_programmes
 			(channel_id, start, stop, title, sub_title, descr, category) VALUES `)
 		args := make([]any, 0, (end-start)*7)
 		for i, p := range progs[start:end] {
@@ -103,6 +155,9 @@ func (s *Store) InsertProgrammes(ctx context.Context, progs []Programme) error {
 			sb.WriteString("(?,?,?,?,?,?,?)")
 			args = append(args, p.ChannelID, p.Start, p.Stop, p.Title, p.SubTitle, p.Descr, p.Category)
 		}
+		sb.WriteString(` ON DUPLICATE KEY UPDATE
+			stop=VALUES(stop), title=VALUES(title), sub_title=VALUES(sub_title),
+			descr=VALUES(descr), category=VALUES(category)`)
 		if _, err := s.db.ExecContext(ctx, sb.String(), args...); err != nil {
 			return fmt.Errorf("批量写入节目失败: %w", err)
 		}

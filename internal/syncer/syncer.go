@@ -302,8 +302,10 @@ func (s *Syncer) doSyncOne(ctx context.Context, src store.SourceRow) error {
 	}
 
 	// 第二遍：节目（流式回调，500 条/批入库）
-	windowFrom := epgtime.DayStart(time.Now(), s.loc)
-	windowTo := windowFrom.AddDate(0, 0, s.cfg.EPG.KeepDays)
+	// 窗口 = [今天-history_days, 今天+keep_days]：源是滚动窗口，
+	// 但源内仍含昨日数据时一并入库，历史节目得以保留
+	windowFrom := epgtime.DayStart(time.Now(), s.loc).AddDate(0, 0, -s.cfg.EPG.HistoryDays)
+	windowTo := epgtime.DayStart(time.Now(), s.loc).AddDate(0, 0, s.cfg.EPG.KeepDays)
 
 	r2, err := openMaybeGzip(tmpPath)
 	if err != nil {
@@ -374,8 +376,9 @@ func (s *Syncer) doSyncOne(ctx context.Context, src store.SourceRow) error {
 }
 
 // cleanup 过期节目清理 + 已移除源的遗留数据清扫，在每轮全量同步后执行。
+// 清理线 = 今天-history_days（含当天跨天节目：start 早于今天但未越过历史窗口）。
 func (s *Syncer) cleanup(ctx context.Context, sources []store.SourceRow) {
-	before := epgtime.DayStart(time.Now(), s.loc)
+	before := epgtime.DayStart(time.Now(), s.loc).AddDate(0, 0, -s.cfg.EPG.HistoryDays)
 	if n, err := s.store.CleanupProgrammes(ctx, before); err != nil {
 		log.Printf("[syncer] 过期清理失败: %v", err)
 	} else if n > 0 {

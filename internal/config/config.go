@@ -44,6 +44,7 @@ type RedisConfig struct {
 // EPGConfig 采集与保留策略。
 type EPGConfig struct {
 	KeepDays        int           `yaml:"keep_days"`
+	HistoryDays     int           `yaml:"history_days"` // 历史节目保留天数（当天起往前），0=不保留历史
 	SyncInterval    time.Duration `yaml:"sync_interval"`
 	SyncConcurrency int           `yaml:"sync_concurrency"`
 	SyncOnStart     bool          `yaml:"sync_on_start"`
@@ -133,6 +134,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.EPG.KeepDays <= 0 {
 		c.EPG.KeepDays = 7
+	}
+	if c.EPG.HistoryDays < 0 {
+		c.EPG.HistoryDays = 0
 	}
 	if c.EPG.SyncInterval <= 0 {
 		c.EPG.SyncInterval = 6 * time.Hour
