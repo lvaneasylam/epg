@@ -327,7 +327,7 @@ func (s *Syncer) doSyncOne(ctx context.Context, src store.SourceRow) error {
 		return nil
 	}
 	_, perr := xmltv.ParseProgrammes(r2, s.loc, func(pi xmltv.ProgrammeInput) error {
-		if pi.Title == "" {
+		if pi.Title == "" || isJunkTitle(pi.Title) {
 			return nil
 		}
 		chID, ok := chMap[strings.ToLower(pi.XmltvID)]
@@ -416,6 +416,26 @@ func (s *Syncer) Seed() error {
 		return nil
 	}
 	return s.store.SeedSources(context.Background(), seeds)
+}
+
+// junkTitleKeywords 水印/占位节目标题关键词（简繁体）。
+// 仅收录"无信息量"的确定形态，避免误杀真实节目（如「香港都會大學提供:知識新天地」）。
+var junkTitleKeywords = []string{
+	"提供节目单服务", "提供節目單服務", // 源推广：由 https://xxx 提供节目单服务
+	"暂无节目单", "暫無節目單",     // 暂无节目单1/2/3
+	"暂未提供", "暫未提供",         // 精彩节目-暂未提供节目预告信息
+	"尚未提供當日節目表",           // 頻道尚未提供當日節目表
+	"未能提供節目表",              // 此頻道未能提供節目表敬請原諒!
+}
+
+// isJunkTitle 判断是否源推广水印或"无节目"占位条目（入库时丢弃）。
+func isJunkTitle(title string) bool {
+	for _, kw := range junkTitleKeywords {
+		if strings.Contains(title, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 // truncate 按 rune 截断字符串，保证不切坏 UTF-8 且不超出列宽。
