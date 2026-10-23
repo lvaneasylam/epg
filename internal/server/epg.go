@@ -47,6 +47,17 @@ type diypProgramme struct {
 	Desc  string `json:"desc,omitempty"`
 }
 
+// diypHHMM DIYP 时间显示：跨天节目对齐到当天边界——前一天开始的显示 00:00，
+// 延续到次日之后的显示 23:59，保证节目单首尾覆盖整天且时间均为当天。
+func diypHHMM(t, dayStart, dayEnd time.Time, tz *time.Location) string {
+	if t.Before(dayStart) {
+		t = dayStart
+	} else if t.After(dayEnd.Add(-time.Minute)) {
+		t = dayEnd.Add(-time.Minute)
+	}
+	return t.In(tz).Format("15:04")
+}
+
 // handleEPG 接口②：GET /api/epg?ch={频道名}&date=YYYY-MM-DD
 // date 缺省为今天；频道查找顺序：手动绑定 → 名字精确（不区分大小写）→ xmltv_id 匹配。
 func (s *Server) handleEPG(w http.ResponseWriter, r *http.Request) {
@@ -99,11 +110,12 @@ func (s *Server) handleEPG(w http.ResponseWriter, r *http.Request) {
 		Programmes:  make([]epgProgramme, 0, len(progs)),
 	}
 	if len(progs) > 0 {
+		dayEnd := day.Add(24 * time.Hour)
 		diyp := make([]diypProgramme, 0, len(progs))
 		for _, p := range progs {
 			d := diypProgramme{
-				Start: p.Start.In(s.tz()).Format("15:04"),
-				End:   p.Stop.In(s.tz()).Format("15:04"),
+				Start: diypHHMM(p.Start, day, dayEnd, s.tz()),
+				End:   diypHHMM(p.Stop, day, dayEnd, s.tz()),
 				Title: p.Title,
 				Desc:  p.Descr,
 			}

@@ -61,3 +61,26 @@ func TestWriteXMLTV(t *testing.T) {
 		t.Error("非代表频道的节目不应出现在输出中")
 	}
 }
+
+func TestDiypHHMM(t *testing.T) {
+	sh, _ := time.LoadLocation("Asia/Shanghai")
+	day := time.Date(2026, 10, 23, 0, 0, 0, 0, sh)
+	dayEnd := day.Add(24 * time.Hour)
+
+	cases := []struct {
+		t    time.Time
+		want string
+	}{
+		{day.Add(23*time.Hour + 50*time.Minute), "23:50"},                        // 窗口内原样
+		{day.Add(9 * time.Hour), "09:00"},                                       // 窗口内原样
+		{day.Add(-10 * time.Minute), "00:00"},                                   // 前一天开始 → 对齐 00:00
+		{day.Add(-2 * time.Hour), "00:00"},                                      // 前一天更早开始 → 对齐 00:00
+		{dayEnd.Add(30 * time.Minute), "23:59"},                                 // 延续到次日 → 对齐 23:59
+		{dayEnd, "23:59"},                                                       // 恰好到次日 0 点 → 23:59
+	}
+	for _, c := range cases {
+		if got := diypHHMM(c.t, day, dayEnd, sh); got != c.want {
+			t.Errorf("diypHHMM(%v) = %s, want %s", c.t, got, c.want)
+		}
+	}
+}

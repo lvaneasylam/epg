@@ -148,10 +148,15 @@ func (s *Store) FindChannel(ctx context.Context, name string) (*Channel, error) 
 
 // batchQueryProgrammes 分批以 IN 查询节目（每批 500 个 channel_id，
 // 控制参数数量与 SQL 长度），通过 fn 流式回调，避免大结果集驻留内存。
+// 结果为"与 [from, to) 相交"的全部节目：窗口内节目 + 从前一天跨入窗口的节目
+// （如 23:50 开始、次日凌晨结束），跨入部分先回调（start 最小），整体保持 start 升序。
 // withDesc=false 时不取 descr TEXT 大列（timeline 等仅需概要的场景，显著降低传输量）。
 func (s *Store) batchQueryProgrammes(ctx context.Context, channelIDs []int64,
 	from, to time.Time, withDesc bool, fn func(Programme) error) error {
 	const batch = 500
+	// overnight 跨入窗口的节目 start 下限：正常节目单单档不超 24h，
+	// 限制扫描范围以走 idx_start 索引
+	const overnight = 24 * time.Hour
 	cols := "channel_id, start, stop, title, sub_title, '' AS descr, category"
 	if withDesc {
 		cols = "channel_id, start, stop, title, sub_title, IFNULL(descr,''), category"
@@ -162,11 +167,6 @@ func (s *Store) batchQueryProgrammes(ctx context.Context, channelIDs []int64,
 			end = len(channelIDs)
 		}
 		ids := channelIDs[start:end]
-		args := make([]any, 0, len(ids)+2)
-		args = append(args, from, to)
-		for _, id := range ids {
-			args = append(args, id)
-		}
 		placeholders := ""
 		for i := range ids {
 			if i > 0 {
@@ -174,36 +174,64 @@ func (s *Store) batchQueryProgrammes(ctx context.Context, channelIDs []int64,
 			}
 			placeholders += "?"
 		}
+		// 1) 从前一天跨入窗口的节目（窗口起点正在播出，如 23:50~00:40）
 		q := `SELECT ` + cols + `
 		      FROM epg_programmes
-		      WHERE start >= ? AND start < ? AND channel_id IN (` + placeholders + `)
+		      WHERE start >= ? AND start < ? AND stop > ? AND channel_id IN (` + placeholders + `)
 		      ORDER BY start, channel_id`
-		rows, err := s.db.QueryContext(ctx, q, args...)
-		if err != nil {
+		args := make([]any, 0, len(ids)+3)
+		args = append(args, from.Add(-overnight), from, from)
+		for _, id := range ids {
+			args = append(args, id)
+		}
+		if err := s.queryStream(ctx, q, args, fn); err != nil {
 			return err
 		}
-		for rows.Next() {
-			var p Programme
-			if err := rows.Scan(&p.ChannelID, &p.Start, &p.Stop, &p.Title,
-				&p.SubTitle, &p.Descr, &p.Category); err != nil {
-				rows.Close()
-				return err
-			}
-			if err := fn(p); err != nil {
-				rows.Close()
-				return err
-			}
+		// 2) 窗口内开始的节目
+		q = `SELECT ` + cols + `
+		     FROM epg_programmes
+		     WHERE start >= ? AND start < ? AND channel_id IN (` + placeholders + `)
+		     ORDER BY start, channel_id`
+		args = args[:0]
+		args = append(args, from, to)
+		for _, id := range ids {
+			args = append(args, id)
 		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
+		if err := s.queryStream(ctx, q, args, fn); err != nil {
 			return err
 		}
-		rows.Close()
 	}
 	return nil
 }
 
-// ProgrammesBetween 查询频道集合在 [from, to) 时间段内的节目，按开始时间排序。
+// queryStream 执行查询并逐行扫描回调，统一 rows 生命周期管理。
+func (s *Store) queryStream(ctx context.Context, q string, args []any,
+	fn func(Programme) error) error {
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var p Programme
+		if err := rows.Scan(&p.ChannelID, &p.Start, &p.Stop, &p.Title,
+			&p.SubTitle, &p.Descr, &p.Category); err != nil {
+			rows.Close()
+			return err
+		}
+		if err := fn(p); err != nil {
+			rows.Close()
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	return rows.Close()
+}
+
+// ProgrammesBetween 查询频道集合与 [from, to) 相交的节目（含从前一天跨入的），
+// 按开始时间排序。
 func (s *Store) ProgrammesBetween(ctx context.Context, channelIDs []int64,
 	from, to time.Time, withDesc bool) ([]Programme, error) {
 	var out []Programme
