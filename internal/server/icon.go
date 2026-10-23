@@ -86,6 +86,8 @@ func contentTypeByExt(p string) string {
 
 // iconURL 生成对外图标地址：显式 base_url 优先，否则按请求 Host 动态生成
 // （反代/换域名后自动跟随，无需改配置）。
+// 反代场景优先 X-Forwarded-Host（Caddy 等默认携带）；Nginx 需显式
+// proxy_set_header Host $host 才能让 r.Host 为原始域名。
 func (s *Server) iconURL(r *http.Request, channelName string) string {
 	base := s.cfg.Icon.BaseURL
 	if base == "" {
@@ -93,7 +95,11 @@ func (s *Server) iconURL(r *http.Request, channelName string) string {
 		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
 			scheme = "https"
 		}
-		base = scheme + "://" + r.Host
+		host := r.Header.Get("X-Forwarded-Host")
+		if host == "" {
+			host = r.Host
+		}
+		base = scheme + "://" + host
 	}
 	return strings.TrimSuffix(base, "/") + "/icon/" + url.PathEscape(channelName) + ".png"
 }
