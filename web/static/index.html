@@ -20,6 +20,7 @@
     <input id="chSearch" placeholder="搜索频道定位" autocomplete="off">
     <label class="switch" title="显示/隐藏节目卡片上的文字"><input type="checkbox" id="toggleProgText" checked>节目信息</label>
     <label class="switch" title="在频道名前显示/隐藏台标"><input type="checkbox" id="toggleIcons" checked>频道图标</label>
+    <button id="apiBtn" class="top-link" title="复制 XML / DIYP 接口地址">接口复制</button>
     <a class="admin-link" href="/admin" target="_blank" title="管理源与频道绑定">管理</a>
   </header>
 
@@ -43,6 +44,26 @@
     <div class="pop-time" id="popTime"></div>
     <div class="pop-cat" id="popCat" hidden></div>
     <div class="pop-desc" id="popDesc"></div>
+  </div>
+
+  <div class="modal-mask" id="apiModal" hidden>
+    <div class="api-modal">
+      <div class="api-head"><b>接口地址</b><span id="apiModalClose">✕</span></div>
+      <div class="api-item">
+        <div class="api-label">XML 接口<span>XMLTV 全量节目单，供播放器 / 订阅工具使用</span></div>
+        <div class="api-row">
+          <input id="apiXmlUrl" readonly>
+          <button class="primary copy-btn" data-copy="apiXmlUrl">复制</button>
+        </div>
+      </div>
+      <div class="api-item">
+        <div class="api-label">DIYP 接口<span>DIYP / 百川等播放器节目单接口，播放器自动附加 ch / date 参数</span></div>
+        <div class="api-row">
+          <input id="apiDiypUrl" readonly>
+          <button class="primary copy-btn" data-copy="apiDiypUrl">复制</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div id="toast" hidden></div>

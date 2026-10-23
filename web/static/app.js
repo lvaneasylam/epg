@@ -262,6 +262,48 @@ function positionPopup(card) {
 
 function closePopup() { $("popup").hidden = true; }
 
+/* ---------- 接口地址弹窗 ---------- */
+
+function fillApiUrls() {
+  // 域名取当前访问地址（location.origin），适配任意部署环境
+  $("apiXmlUrl").value = `${location.origin}/api/xml`;
+  $("apiDiypUrl").value = `${location.origin}/api/epg`;
+}
+
+async function copyText(text) {
+  // clipboard API 仅安全上下文（HTTPS / localhost）可用，HTTP 部署时降级 execCommand
+  if (navigator.clipboard && window.isSecureContext) {
+    try { await navigator.clipboard.writeText(text); return true; } catch (_) {}
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.cssText = "position:fixed;opacity:0";
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (_) {}
+  ta.remove();
+  return ok;
+}
+
+function bindApiModal() {
+  const modal = $("apiModal");
+  $("apiBtn").addEventListener("click", () => {
+    fillApiUrls();
+    modal.hidden = false;
+  });
+  $("apiModalClose").addEventListener("click", () => (modal.hidden = true));
+  modal.addEventListener("click", async (e) => {
+    if (e.target === modal) { modal.hidden = true; return; }         // 点遮罩关闭
+    if (e.target.tagName === "INPUT") { e.target.select(); return; } // 点输入框全选
+    const btn = e.target.closest(".copy-btn");
+    if (btn) {
+      const ok = await copyText($(btn.dataset.copy).value);
+      toast(ok ? "已复制到剪贴板" : "复制失败，请手动选择复制");
+    }
+  });
+}
+
 /* ---------- 事件绑定 ---------- */
 
 function shiftDate(days) {
@@ -290,11 +332,13 @@ function bind() {
     }
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closePopup();
+    if (e.key === "Escape") { closePopup(); $("apiModal").hidden = true; }
     if (e.target.tagName === "INPUT") return;
     if (e.key === "ArrowLeft") shiftDate(-1);
     if (e.key === "ArrowRight") shiftDate(1);
   });
+
+  bindApiModal();
 }
 
 /* ---------- 启动 ---------- */
