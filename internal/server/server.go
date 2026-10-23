@@ -76,6 +76,7 @@ func New(cfg *config.Config, st *store.Store, sy *syncer.Syncer, ca cache.Cache,
 	admin.HandleFunc("GET /bindings/candidates", s.adminBindingCandidates)
 	admin.HandleFunc("PUT /bindings", s.adminSetBinding)
 	admin.HandleFunc("DELETE /bindings/{name}", s.adminDeleteBinding)
+	admin.HandleFunc("PUT /hidden", s.adminSetHidden)
 	admin.HandleFunc("POST /icons/refresh", s.adminRefreshIcons)
 	mux.Handle("/api/admin/", http.StripPrefix("/api/admin", s.requireAdminHandler(admin)))
 

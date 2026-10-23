@@ -11,7 +11,7 @@ import (
 // 避免依赖 ONLY_FULL_GROUP_BY 等不确定的 sql_mode 行为。
 func (s *Store) AllChannels(ctx context.Context) ([]Channel, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, source, priority, xmltv_id, name, icon FROM epg_channels`)
+		`SELECT id, source, priority, xmltv_id, name, icon, updated_at FROM epg_channels`)
 	if err != nil {
 		return nil, err
 	}
@@ -19,7 +19,7 @@ func (s *Store) AllChannels(ctx context.Context) ([]Channel, error) {
 	var out []Channel
 	for rows.Next() {
 		var c Channel
-		if err := rows.Scan(&c.ID, &c.Source, &c.Priority, &c.XmltvID, &c.Name, &c.Icon); err != nil {
+		if err := rows.Scan(&c.ID, &c.Source, &c.Priority, &c.XmltvID, &c.Name, &c.Icon, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -62,6 +62,21 @@ func ApplyBindings(all []Channel, bindings BindingMap) []Channel {
 			if c, ok2 := byID[id]; ok2 {
 				out[i] = c
 			}
+		}
+	}
+	return out
+}
+
+// FilterHidden 过滤隐藏频道（首页时间轴用）：hidden 为名字黑名单。
+// 名单按对外频道名键控，频道从源中临时消失时保留设置，频道回归后依然生效。
+func FilterHidden(channels []Channel, hidden map[string]bool) []Channel {
+	if len(hidden) == 0 {
+		return channels
+	}
+	out := make([]Channel, 0, len(channels))
+	for _, c := range channels {
+		if !hidden[c.Name] {
+			out = append(out, c)
 		}
 	}
 	return out

@@ -197,6 +197,9 @@ function renderBindRows() {
       <td>${esc(b.target_name || "—")}</td>
       <td>${esc(b.target_source || "—")}</td>
       <td>${b.candidates > 0 ? "+" + b.candidates + " 个备用源" : "—"}</td>
+      <td title="${fmtTime(b.channel_updated_at)}">${ago(b.channel_updated_at)}</td>
+      <td><input type="checkbox" class="vis-check" data-hide="${esc(b.channel_name)}"
+        ${b.hidden ? "" : "checked"} title="勾选=首页显示"></td>
       <td><div class="op-cell">
         <button class="btn ghost mini" data-pick="${esc(b.channel_name)}">选择</button>
         ${b.mode === "manual" ? `<button class="btn danger mini" data-unbind="${esc(b.channel_name)}">解绑</button>` : ""}
@@ -212,6 +215,25 @@ $("bindFilter").addEventListener("click", (e) => {
   bindFilterMode = b.dataset.f;
   $("bindFilter").querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
   renderBindRows();
+});
+
+// 首页显示开关：勾选=显示，取消=隐藏（仅影响首页时间轴，对外接口不变）
+$("bindRows").addEventListener("change", async (e) => {
+  const cb = e.target.closest("[data-hide]");
+  if (!cb) return;
+  const name = cb.dataset.hide;
+  const hidden = !cb.checked;
+  cb.disabled = true;
+  try {
+    await api("/hidden", { method: "PUT", body: { channel_name: name, hidden } });
+    const b = bindings.find((x) => x.channel_name === name);
+    if (b) b.hidden = hidden;
+    toast(hidden ? "已隐藏，首页不再显示" : "已恢复首页显示");
+  } catch (err) {
+    cb.checked = hidden; // 失败回滚
+    toast(err.message);
+  }
+  cb.disabled = false;
 });
 
 let bindingName = null;

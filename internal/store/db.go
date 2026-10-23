@@ -114,6 +114,11 @@ func (s *Store) Migrate() error {
   PRIMARY KEY (id),
   UNIQUE KEY uk_channel_name (channel_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+		`CREATE TABLE IF NOT EXISTS epg_hidden_channels (
+  channel_name VARCHAR(128) NOT NULL COMMENT '对外频道名（存在即隐藏，不在首页时间轴显示）',
+  created_at   DATETIME     NOT NULL,
+  PRIMARY KEY (channel_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 	}
 	for _, ddl := range schema {
 		if _, err := s.db.Exec(ddl); err != nil {

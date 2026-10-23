@@ -4,12 +4,13 @@ import "time"
 
 // Channel 频道记录。
 type Channel struct {
-	ID       int64  `json:"id"`
-	Source   string `json:"source"`
-	Priority int    `json:"priority"`
-	XmltvID  string `json:"xmltv_id"`
-	Name     string `json:"name"`
-	Icon     string `json:"icon"`
+	ID        int64     `json:"id"`
+	Source    string    `json:"source"`
+	Priority  int       `json:"priority"`
+	XmltvID   string    `json:"xmltv_id"`
+	Name      string    `json:"name"`
+	Icon      string    `json:"icon"`
+	UpdatedAt time.Time `json:"updated_at"` // 所属源最近一次同步时间
 }
 
 // Programme 节目记录。

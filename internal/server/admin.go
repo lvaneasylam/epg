@@ -60,7 +60,12 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "数据库查询失败", http.StatusInternalServerError)
 		return
 	}
-	channels := store.ApplyBindings(all, bindings)
+	hidden, err := s.store.HiddenSet(r.Context())
+	if err != nil {
+		http.Error(w, "数据库查询失败", http.StatusInternalServerError)
+		return
+	}
+	channels := store.FilterHidden(store.ApplyBindings(all, bindings), hidden)
 	ids := make([]int64, 0, len(channels))
 	byID := make(map[int64]int, len(channels)) // channel_id → out 下标
 	for i, c := range channels {
@@ -318,14 +323,16 @@ func (s *Server) adminSyncSource(w http.ResponseWriter, r *http.Request) {
 
 // ---------- 绑定 API ----------
 
-// bindingView 绑定列表视图：对外频道 + 生效来源 + 候选数。
+// bindingView 绑定列表视图：对外频道 + 生效来源 + 候选数 + 首页显示状态。
 type bindingView struct {
-	ChannelName  string     `json:"channel_name"`  // 对外频道名
-	Mode         string     `json:"mode"`          // auto / manual
-	TargetName   string     `json:"target_name"`   // 生效频道显示名
-	TargetSource string     `json:"target_source"` // 生效来源
-	Candidates   int        `json:"candidates"`    // 跨源同名频道数（备用源数）
-	UpdatedAt    *time.Time `json:"updated_at,omitempty"`
+	ChannelName      string     `json:"channel_name"`      // 对外频道名
+	Mode             string     `json:"mode"`              // auto / manual
+	TargetName       string     `json:"target_name"`       // 生效频道显示名
+	TargetSource     string     `json:"target_source"`     // 生效来源
+	Candidates       int        `json:"candidates"`        // 跨源同名频道数（备用源数）
+	ChannelUpdatedAt *time.Time `json:"channel_updated_at"` // 生效频道行的更新时间（所属源最近同步）
+	Hidden           bool       `json:"hidden"`             // 是否隐藏（不在首页时间轴显示）
+	UpdatedAt        *time.Time `json:"updated_at,omitempty"`
 }
 
 // adminListBindings GET /api/admin/bindings
@@ -337,6 +344,11 @@ func (s *Server) adminListBindings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bindings, err := s.store.ListBindings(r.Context())
+	if err != nil {
+		http.Error(w, "数据库查询失败", http.StatusInternalServerError)
+		return
+	}
+	hidden, err := s.store.HiddenSet(r.Context())
 	if err != nil {
 		http.Error(w, "数据库查询失败", http.StatusInternalServerError)
 		return
@@ -353,12 +365,15 @@ func (s *Server) adminListBindings(w http.ResponseWriter, r *http.Request) {
 	channels := store.ApplyBindings(all, nil2Map(bindings))
 	out := make([]bindingView, 0, len(channels))
 	for _, c := range channels {
+		t := c.UpdatedAt
 		v := bindingView{
-			ChannelName:  c.Name,
-			Mode:         "auto",
-			TargetName:   c.Name,
-			TargetSource: c.Source,
-			Candidates:   len(byName[c.Name]) - 1,
+			ChannelName:      c.Name,
+			Mode:             "auto",
+			TargetName:       c.Name,
+			TargetSource:     c.Source,
+			Candidates:       len(byName[c.Name]) - 1,
+			ChannelUpdatedAt: &t,
+			Hidden:           hidden[c.Name],
 		}
 		if b, ok := manual[c.Name]; ok {
 			v.Mode = "manual"
@@ -480,6 +495,29 @@ func (s *Server) adminDeleteBinding(w http.ResponseWriter, r *http.Request) {
 	}
 	s.bindVer.Add(1) // 绑定变更，缓存立即失效
 	writeJSON(w, http.StatusOK, map[string]string{"message": "已解除绑定"})
+}
+
+// adminSetHidden PUT /api/admin/hidden  body: {"channel_name","hidden"}
+// 设置/取消频道隐藏（仅影响首页时间轴，对外 XML / DIYP 不受影响）。
+func (s *Server) adminSetHidden(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ChannelName string `json:"channel_name"`
+		Hidden      bool   `json:"hidden"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ChannelName == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "参数不完整"})
+		return
+	}
+	if err := s.store.SetHidden(r.Context(), body.ChannelName, body.Hidden); err != nil {
+		http.Error(w, "数据库操作失败", http.StatusInternalServerError)
+		return
+	}
+	s.bindVer.Add(1) // 隐藏变更，时间轴缓存立即失效
+	msg := "已隐藏，首页不再显示"
+	if !body.Hidden {
+		msg = "已恢复首页显示"
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": msg})
 }
 
 // adminRefreshIcons POST /api/admin/icons/refresh 手动重建图标索引（拷贝文件后立即可用）
