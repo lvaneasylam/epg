@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EPG 配置</title>
+  <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+  <header class="page-head">
+    <div>
+      <h1>EPG 配置</h1>
+      <p class="sub">管理 XMLTV 源与频道绑定</p>
+    </div>
+    <div class="head-actions">
+      <a class="btn ghost" href="/" target="_blank">打开节目单</a>
+      <button class="btn ghost" id="refreshIconsBtn" title="拷贝图标文件后点击立即生效">刷新图标索引</button>
+      <button class="btn" id="syncAllBtn">全部同步</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="sources">EPG 源</button>
+    <button class="tab" data-tab="bindings">频道绑定</button>
+  </nav>
+
+  <!-- EPG 源 -->
+  <section id="tab-sources" class="tab-panel">
+    <div class="panel-head">
+      <span class="hint">改动即时生效（下一轮调度自动拾取，无需重启）</span>
+      <button class="btn" id="addSourceBtn">＋ 添加源</button>
+    </div>
+    <div class="card">
+      <table class="table">
+        <thead>
+          <tr>
+            <th style="width:170px">名称</th>
+            <th>地址</th>
+            <th style="width:70px">优先级</th>
+            <th style="width:90px">间隔</th>
+            <th style="width:220px">状态</th>
+            <th style="width:210px">覆盖</th>
+            <th style="width:190px">操作</th>
+          </tr>
+        </thead>
+        <tbody id="sourceRows"></tbody>
+      </table>
+      <div class="empty" id="sourceEmpty" hidden>暂无源，点击右上角「添加源」</div>
+    </div>
+  </section>
+
+  <!-- 频道绑定 -->
+  <section id="tab-bindings" class="tab-panel" hidden>
+    <div class="panel-head">
+      <div class="bind-stats" id="bindStats"></div>
+      <div class="filters">
+        <input type="search" id="bindSearch" placeholder="搜索频道名">
+        <div class="seg" id="bindFilter">
+          <button data-f="all" class="active">全部</button>
+          <button data-f="auto">自动</button>
+          <button data-f="manual">手动锁定</button>
+        </div>
+      </div>
+    </div>
+    <div class="hint note">
+      同名频道默认按源优先级自动选取；「手动锁定」强制使用指定源的频道，不会被自动选择覆盖。
+    </div>
+    <div class="card">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>频道</th>
+            <th style="width:130px">绑定</th>
+            <th>上游显示名</th>
+            <th style="width:130px">来源</th>
+            <th style="width:110px">备用源</th>
+            <th style="width:150px">操作</th>
+          </tr>
+        </thead>
+        <tbody id="bindRows"></tbody>
+      </table>
+      <div class="empty" id="bindEmpty" hidden>暂无频道数据，请先同步至少一个源</div>
+    </div>
+  </section>
+
+  <!-- 源编辑弹窗 -->
+  <div class="modal-mask" id="sourceModal" hidden>
+    <div class="modal">
+      <h3 id="sourceModalTitle">添加源</h3>
+      <label>名称（唯一标识）
+        <input id="fName" placeholder="如 51zmt">
+      </label>
+      <label>地址（XMLTV，支持 xml / xml.gz）
+        <input id="fUrl" placeholder="https://example.com/epg.xml.gz">
+      </label>
+      <div class="row2">
+        <label>优先级（小者优先）
+          <input id="fPriority" type="number" value="10">
+        </label>
+        <label>同步间隔（分钟，0=用全局）
+          <input id="fInterval" type="number" value="0">
+        </label>
+      </div>
+      <label class="check">
+        <input id="fEnabled" type="checkbox" checked> 启用
+      </label>
+      <div class="modal-actions">
+        <button class="btn ghost" data-close>取消</button>
+        <button class="btn" id="saveSourceBtn">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 绑定选择弹窗 -->
+  <div class="modal-mask" id="bindModal" hidden>
+    <div class="modal">
+      <h3>绑定频道：<span id="bindTargetName"></span></h3>
+      <div class="hint">选择该频道使用的 EPG 数据来源（悬停候选即在右侧对比全日节目）</div>
+      <div id="bindCandidates" class="cand-list"></div>
+      <div class="modal-actions">
+        <button class="btn ghost" data-close>取消</button>
+        <button class="btn" id="saveBindBtn">锁定绑定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 全日节目对比浮窗：左=当前选择，右=悬停候选 -->
+  <div class="compare-pop" id="comparePop" hidden>
+    <div class="cp-head"><b>全日节目对比</b><span id="cpClose">✕</span></div>
+    <div class="cp-body">
+      <div class="cp-col">
+        <div class="cp-title" id="cpLeftTitle"></div>
+        <div class="cp-list" id="cpLeft"></div>
+      </div>
+      <div class="cp-col">
+        <div class="cp-title" id="cpRightTitle"></div>
+        <div class="cp-list" id="cpRight"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" hidden></div>
+  <script src="/static/admin.js"></script>
+</body>
+</html>

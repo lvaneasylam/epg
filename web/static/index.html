@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EPG 节目单</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">EPG<i>节目单</i></div>
+    <div class="stats" id="stats">加载中…</div>
+    <div class="flex-spacer"></div>
+    <div class="date-nav">
+      <button id="prevDay" title="前一天">‹</button>
+      <input type="date" id="dateInput">
+      <button id="nextDay" title="后一天">›</button>
+      <button id="todayBtn" class="ghost">今天</button>
+    </div>
+    <input id="chSearch" placeholder="搜索频道定位" autocomplete="off">
+    <label class="switch" title="显示/隐藏节目卡片上的文字"><input type="checkbox" id="toggleProgText" checked>节目信息</label>
+    <label class="switch" title="在频道名前显示/隐藏台标"><input type="checkbox" id="toggleIcons" checked>频道图标</label>
+    <a class="admin-link" href="/admin" target="_blank" title="管理源与频道绑定">管理</a>
+  </header>
+
+  <main id="viewport">
+    <div id="grid">
+      <div id="headerRow">
+        <div class="corner">频道 / 时间</div>
+        <div class="ticks" id="ticks"></div>
+      </div>
+      <div id="rows"></div>
+      <div id="nowLine"><i></i></div>
+    </div>
+    <div id="emptyState" hidden>
+      <h3>暂无节目数据</h3>
+      <p id="emptyHint">请确认 EPG 源已配置并完成一次同步</p>
+    </div>
+  </main>
+
+  <div id="popup" hidden>
+    <div class="pop-head"><b id="popTitle"></b><span id="popClose">✕</span></div>
+    <div class="pop-time" id="popTime"></div>
+    <div class="pop-cat" id="popCat" hidden></div>
+    <div class="pop-desc" id="popDesc"></div>
+  </div>
+
+  <div id="toast" hidden></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

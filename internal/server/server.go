@@ -1,0 +1,188 @@
+// Package server 提供 HTTP 服务：对外 EPG 接口、页面与运行状态接口。
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net"
+	"net/http"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"goepg/internal/cache"
+	"goepg/internal/config"
+	"goepg/internal/iconlib"
+	"goepg/internal/store"
+	"goepg/internal/syncer"
+	"goepg/web"
+)
+
+// Server HTTP 服务，聚合各模块依赖。
+type Server struct {
+	cfg    *config.Config
+	store  *store.Store
+	syncer *syncer.Syncer
+	cache  cache.Cache
+	icons  *iconlib.Library
+	loc    *time.Location
+
+	// xmlMu 串行化全量 XML 生成（重操作），实现简单版 single-flight：
+	// 并发请求等待锁后先做 ETag 命中检查，避免重复生成。
+	xmlMu sync.Mutex
+
+	// bindVer 绑定变更计数：与同步版本共同构成响应缓存键的数据版本，
+	// 绑定/解绑后旧缓存立即失效，避免接口返回过期数据。
+	bindVer atomic.Int64
+
+	httpServer *http.Server
+}
+
+// dataVersion 聚合数据版本（最近同步时间戳 + 绑定变更计数），
+// 用于接口缓存键与全量 XML 的 ETag。
+func (s *Server) dataVersion() string {
+	return fmt.Sprintf("%d-%d", s.syncer.DataVersion(), s.bindVer.Load())
+}
+
+// New 创建 HTTP 服务并注册路由（Go 1.22+ 方法路由）。
+func New(cfg *config.Config, st *store.Store, sy *syncer.Syncer, ca cache.Cache, loc *time.Location) (*Server, error) {
+	s := &Server{cfg: cfg, store: st, syncer: sy, cache: ca, loc: loc}
+	if err := s.initIconLib(); err != nil {
+		return nil, err
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", s.handlePage)
+	mux.HandleFunc("GET /admin", s.requireAdmin(s.handleAdminPage))
+	mux.Handle("GET /static/", http.StripPrefix("/static/",
+		http.FileServer(http.FS(web.StaticFS()))))
+	mux.HandleFunc("GET /icon/{name}", s.handleIcon)
+	mux.HandleFunc("GET /api/xml", s.handleXML)
+	mux.HandleFunc("GET /api/epg", s.handleEPG)
+	mux.HandleFunc("GET /api/timeline", s.handleTimeline)
+	mux.HandleFunc("GET /api/status", s.handleStatus)
+	mux.HandleFunc("POST /api/sync", s.handleSyncNow)
+
+	// 管理 API（token 鉴权）
+	admin := http.NewServeMux()
+	admin.HandleFunc("GET /sources", s.adminListSources)
+	admin.HandleFunc("POST /sources", s.adminCreateSource)
+	admin.HandleFunc("PUT /sources/{id}", s.adminUpdateSource)
+	admin.HandleFunc("DELETE /sources/{id}", s.adminDeleteSource)
+	admin.HandleFunc("POST /sources/{id}/toggle", s.adminToggleSource)
+	admin.HandleFunc("POST /sources/{id}/sync", s.adminSyncSource)
+	admin.HandleFunc("GET /bindings", s.adminListBindings)
+	admin.HandleFunc("GET /bindings/candidates", s.adminBindingCandidates)
+	admin.HandleFunc("PUT /bindings", s.adminSetBinding)
+	admin.HandleFunc("DELETE /bindings/{name}", s.adminDeleteBinding)
+	admin.HandleFunc("POST /icons/refresh", s.adminRefreshIcons)
+	mux.Handle("/api/admin/", http.StripPrefix("/api/admin", s.requireAdminHandler(admin)))
+
+	s.httpServer = &http.Server{
+		Addr:              cfg.Server.Addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	return s, nil
+}
+
+// adminLoginHTML 管理页未授权时输出的密码输入页，提交后以 ?token= 重新进入。
+const adminLoginHTML = `<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>EPG 管理 · 登录</title></head>
+<body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;
+background:#f5f6f8;font-family:system-ui,-apple-system,sans-serif">
+<form onsubmit="location.search='?token='+encodeURIComponent(this.p.value);return false"
+ style="background:#fff;padding:28px 26px;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.08);text-align:center">
+<div style="font-size:16px;font-weight:600;margin-bottom:4px">EPG 配置管理</div>
+<div style="font-size:12px;color:#888;margin-bottom:18px">请输入管理密码</div>
+<input type="password" name="p" autofocus placeholder="密码"
+ style="width:220px;height:34px;border:1px solid #d9d9d9;border-radius:6px;padding:0 10px;font-size:14px;outline:none">
+<button style="height:34px;margin-left:8px;padding:0 16px;border:0;border-radius:6px;
+background:#1677ff;color:#fff;font-size:14px;cursor:pointer">进入</button>
+<div style="font-size:12px;color:#c00;margin-top:12px">未授权：密码与配置文件 admin.token 不符</div>
+</form></body></html>`
+
+// requireAdmin 页面级鉴权：token 非空时要求 ?token= 或 Authorization。
+func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.checkAdminToken(r) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(adminLoginHTML))
+			return
+		}
+		next(w, r)
+	}
+}
+
+// requireAdminHandler 中间件形式的鉴权（包整个 admin mux）。
+func (s *Server) requireAdminHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.checkAdminToken(r) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未授权"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// checkAdminToken 校验管理令牌；未配置 token 时直接放行（内网部署场景）。
+func (s *Server) checkAdminToken(r *http.Request) bool {
+	if s.cfg.Admin.Token == "" {
+		return true
+	}
+	if r.URL.Query().Get("token") == s.cfg.Admin.Token {
+		return true
+	}
+	return r.Header.Get("Authorization") == "Bearer "+s.cfg.Admin.Token
+}
+
+// ListenAndServe 阻塞启动 HTTP 服务。
+func (s *Server) ListenAndServe() error {
+	ln, err := newListener(s.httpServer.Addr)
+	if err != nil {
+		return err
+	}
+	log.Printf("[server] HTTP 服务已启动，监听 %s", ln.Addr())
+	return s.httpServer.Serve(ln)
+}
+
+// newListener 按配置地址创建监听器。
+// 通配地址显式使用 tcp4：Go 1.26 起 darwin 上 "tcp" 网络的通配监听会创建
+// IPv6-only socket（0.0.0.0 显式地址同样如此），导致 IPv4 请求不可达。
+func newListener(addr string) (net.Listener, error) {
+	if host, port, err := net.SplitHostPort(addr); err == nil &&
+		(host == "" || host == "0.0.0.0") {
+		return net.Listen("tcp4", net.JoinHostPort("0.0.0.0", port))
+	}
+	return net.Listen("tcp", addr)
+}
+
+// Shutdown 优雅停机。
+func (s *Server) Shutdown(ctx context.Context) error {
+	return s.httpServer.Shutdown(ctx)
+}
+
+// tz 业务时区。
+func (s *Server) tz() *time.Location { return s.loc }
+
+// handlePage 输出内嵌的节目单页面。
+func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
+	data, err := web.IndexHTML()
+	if err != nil {
+		http.Error(w, "页面资源缺失", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write(data)
+}
+
+// writeJSON 统一 JSON 输出（禁用浏览器嗅探）。
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(v)
+}

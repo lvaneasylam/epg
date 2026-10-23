@@ -1,0 +1,49 @@
+# goepg 配置文件示例
+# 复制为 config.yaml 后按需修改，启动: ./goepg -c config.yaml
+
+server:
+  addr: ":8080"              # HTTP 监听地址
+  timezone: "Asia/Shanghai"  # 时区（影响"哪一天"的划分与页面显示）
+
+mysql:
+  # MySQL 5.6 兼容 DSN，loc 必须为 Local
+  dsn: "root:123456@tcp(127.0.0.1:3306)/goepg?charset=utf8mb4&parseTime=true&loc=Local"
+  max_open_conns: 20
+  max_idle_conns: 5
+
+redis:
+  addr: ""            # 留空则不使用 Redis，自动降级为进程内存缓存
+  password: ""
+  db: 0
+  cache_ttl: 5m       # 接口缓存有效期
+
+epg:
+  keep_days: 7            # 全库节目单保留天数（含当天）
+  sync_interval: 6h       # 自动同步间隔
+  sync_concurrency: 2     # 多源并发抓取数
+  sync_on_start: true     # 启动时立即同步一次
+  fetch_timeout: 3m       # 单源下载超时
+  max_source_size_mb: 200 # 单源文件大小上限（防异常大文件）
+  default_duration: 30m   # 源数据缺 stop 时的默认节目时长
+
+# EPG 源列表（XMLTV 格式，支持 .xml / .xml.gz / .gz，自动识别）
+# name: 源名称（唯一标识，入库关联用）
+# priority: 优先级，数字越小越优先；不同源存在相同频道名时取优先级高的数据
+# EPG 源列表：首次启动导入数据库作为种子，之后以管理页(/admin)为准，重启不覆盖
+# interval_min: 该源独立同步间隔（分钟），0 = 使用全局 epg.sync_interval
+sources:
+  - name: "demo"
+    url: "https://example.com/epg.xml.gz"
+    priority: 10
+    interval_min: 0
+    enabled: true
+
+# 频道图标（台标）库：按地域子目录人工归档，匹配时递归全目录、模糊匹配
+# base_url: /api/epg 返回 icon 的域名前缀；留空按访问 Host 自动生成
+icon:
+  dir: "data/icons"
+  base_url: ""
+
+# 管理接口令牌：非空时 /admin 与 /api/admin/* 需携带 (?token=xxx 或 Bearer)
+admin:
+  token: ""
