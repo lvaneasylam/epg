@@ -58,26 +58,90 @@ func diypHHMM(t, dayStart, dayEnd time.Time, tz *time.Location) string {
 	return t.In(tz).Format("15:04")
 }
 
+// epgCacheKey /api/epg 响应缓存键（固定，不含数据版本：昨/今/明热数据由
+// 同步后预热覆盖刷新，历史日期短 TTL 自然过期；版本键会让每次同步后全量回源）。
+func epgCacheKey(ch, dateStr string) string {
+	return fmt.Sprintf("epg:ch:%s:%s", strings.ToLower(ch), dateStr)
+}
+
+// epgCacheTTL 昨/今/明（热窗口）长缓存等待预热覆盖；其他日期按配置短缓存。
+func (s *Server) epgCacheTTL(dateStr string) time.Duration {
+	today := epgtime.DayStart(time.Now(), s.tz())
+	if lo, hi := epgtime.FormatDate(today.AddDate(0, 0, -1)),
+		epgtime.FormatDate(today.AddDate(0, 0, 1)); dateStr >= lo && dateStr <= hi {
+		return epgWarmTTL
+	}
+	return s.cfg.Redis.CacheTTL
+}
+
+// buildEPGBody 组装单频道单日响应并序列化（请求路径与预热共用）。
+// icon 由调用方生成：请求路径按 Host 动态，预热按配置 base_url。
+func buildEPGBody(chName, dateStr, icon string, progs []store.Programme,
+	day time.Time, tz *time.Location) []byte {
+	resp := epgResponse{
+		ChannelName: chName, // 回显请求名（绑定场景下与库内显示名可能不同）
+		Date:        dateStr,
+		URL:         "goepg",
+		Icon:        icon,
+		EpgData:     "", // 无数据时为空串（DIYP 兼容）
+		Programmes:  make([]epgProgramme, 0, len(progs)),
+	}
+	if len(progs) > 0 {
+		dayEnd := day.Add(24 * time.Hour)
+		diyp := make([]diypProgramme, 0, len(progs))
+		for _, p := range progs {
+			diyp = append(diyp, diypProgramme{
+				Start: diypHHMM(p.Start, day, dayEnd, tz),
+				End:   diypHHMM(p.Stop, day, dayEnd, tz),
+				Title: p.Title,
+				Desc:  p.Descr,
+			})
+			resp.Programmes = append(resp.Programmes, epgProgramme{
+				Start: p.Start, Stop: p.Stop, Title: p.Title,
+				SubTitle: p.SubTitle, Desc: p.Descr, Category: p.Category,
+			})
+		}
+		resp.EpgData = diyp
+	}
+	var buf bytes.Buffer
+	_ = json.NewEncoder(&buf).Encode(resp)
+	return buf.Bytes()
+}
+
 // handleEPG 接口②：GET /api/epg?ch={频道名}&date=YYYY-MM-DD
-// date 缺省为今天；频道查找顺序：手动绑定 → 名字精确（不区分大小写）→ xmltv_id 匹配。
+// 任何请求都返回 JSON 数据（DIYP 兼容），不返回错误响应：
+//   - date 缺省/非法 → 回退今天
+//   - ch 缺省 → 任意一个当日有节目的频道（公版 DIYP 接口同款行为，
+//     避免播放器无参探测拿到错误 JSON）
+//   - 频道查找顺序：手动绑定 → 名字精确（不区分大小写）→ xmltv_id 匹配
 func (s *Server) handleEPG(w http.ResponseWriter, r *http.Request) {
 	ch := strings.TrimSpace(r.URL.Query().Get("ch"))
-	if ch == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "缺少 ch 参数"})
-		return
-	}
 	dateStr := strings.TrimSpace(r.URL.Query().Get("date"))
-	if dateStr == "" {
-		dateStr = epgtime.FormatDate(time.Now().In(s.tz()))
-	}
 	day, ok := epgtime.ParseDate(dateStr, s.tz())
 	if !ok {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "date 参数格式应为 YYYY-MM-DD"})
-		return
+		dateStr = epgtime.FormatDate(time.Now().In(s.tz()))
+		day, _ = epgtime.ParseDate(dateStr, s.tz())
 	}
 
-	// 命中缓存直接返回（key 含数据版本：同步完成/绑定变更自动失效）
-	cacheKey := fmt.Sprintf("v%s:epg:ch:%s:%s", s.dataVersion(), strings.ToLower(ch), dateStr)
+	// 缺 ch：取当日有节目的任意频道兜底；连节目都没有则返回合法空结构
+	if ch == "" {
+		name, err := s.store.AnyChannelName(r.Context(), day, day.Add(24*time.Hour))
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "数据库查询失败"})
+			return
+		}
+		if name == "" {
+			writeJSON(w, http.StatusOK, epgResponse{
+				Date: dateStr, URL: "goepg", EpgData: "", Programmes: []epgProgramme{},
+			})
+			return
+		}
+		ch = name
+	}
+
+	// 命中缓存直接返回（固定键：昨/今/明热数据由同步后预热覆盖刷新，不随
+	// 数据版本失效——版本键会让每次同步/重启后全量回源，正是响应慢的主因）
+	cacheKey := epgCacheKey(ch, dateStr)
 	if val, hit := s.cache.Get(r.Context(), cacheKey); hit {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("X-Cache", "hit")
@@ -87,7 +151,7 @@ func (s *Server) handleEPG(w http.ResponseWriter, r *http.Request) {
 
 	channel, err := s.store.FindChannel(r.Context(), ch)
 	if err != nil {
-		http.Error(w, "数据库查询失败", http.StatusInternalServerError)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "数据库查询失败"})
 		return
 	}
 	if channel == nil {
@@ -97,43 +161,13 @@ func (s *Server) handleEPG(w http.ResponseWriter, r *http.Request) {
 	progs, err := s.store.ProgrammesBetween(r.Context(),
 		[]int64{channel.ID}, day, day.Add(24*time.Hour), true)
 	if err != nil {
-		http.Error(w, "数据库查询失败", http.StatusInternalServerError)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "数据库查询失败"})
 		return
 	}
 
-	resp := epgResponse{
-		ChannelName: ch, // 回显请求名（绑定场景下与库内显示名可能不同）
-		Date:        dateStr,
-		URL:         "goepg",
-		Icon:        s.iconURL(r, ch),
-		EpgData:     "", // 无数据时为空串（DIYP 兼容）
-		Programmes:  make([]epgProgramme, 0, len(progs)),
-	}
-	if len(progs) > 0 {
-		dayEnd := day.Add(24 * time.Hour)
-		diyp := make([]diypProgramme, 0, len(progs))
-		for _, p := range progs {
-			d := diypProgramme{
-				Start: diypHHMM(p.Start, day, dayEnd, s.tz()),
-				End:   diypHHMM(p.Stop, day, dayEnd, s.tz()),
-				Title: p.Title,
-				Desc:  p.Descr,
-			}
-			diyp = append(diyp, d)
-			resp.Programmes = append(resp.Programmes, epgProgramme{
-				Start: p.Start, Stop: p.Stop, Title: p.Title,
-				SubTitle: p.SubTitle, Desc: p.Descr, Category: p.Category,
-			})
-		}
-		resp.EpgData = diyp
-	}
+	body := buildEPGBody(ch, dateStr, s.iconURL(r, ch), progs, day, s.tz())
 
-	// 序列化一次，同时用于缓存与响应
-	var buf bytes.Buffer
-	_ = json.NewEncoder(&buf).Encode(resp)
-	body := buf.Bytes()
-
-	s.cache.Set(r.Context(), cacheKey, body, s.cfg.Redis.CacheTTL)
+	s.cache.Set(r.Context(), cacheKey, body, s.epgCacheTTL(dateStr))
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Cache", "miss")
 	_, _ = w.Write(body)

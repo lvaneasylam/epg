@@ -249,6 +249,24 @@ func (s *Store) StreamProgrammesBetween(ctx context.Context, channelIDs []int64,
 	return s.batchQueryProgrammes(ctx, channelIDs, from, to, withDesc, fn)
 }
 
+// AnyChannelName 返回 [from, to) 内有节目的任意一个频道名（按名排序取首个，
+// 结果稳定）。供 /api/epg 无参请求兜底：与公版 DIYP 接口一致，无参时返回
+// 有效数据而非错误。无任何节目时返回空串。
+func (s *Store) AnyChannelName(ctx context.Context, from, to time.Time) (string, error) {
+	const overnight = 24 * time.Hour // 与 batchQueryProgrammes 一致：跨天节目 start 下限，保证走 idx_start
+	var name string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT c.name FROM epg_channels c
+		 JOIN epg_programmes p ON p.channel_id = c.id
+		 WHERE p.start >= ? AND p.start < ? AND p.stop > ?
+		 ORDER BY c.name LIMIT 1`,
+		from.Add(-overnight), to, from).Scan(&name)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return name, err
+}
+
 // ProgramCountByChannel 统计频道集合在 [from, to) 内各自的节目数（选源参考）。
 func (s *Store) ProgramCountByChannel(ctx context.Context, channelIDs []int64,
 	from, to time.Time) (map[int64]int, error) {

@@ -40,7 +40,9 @@ sources:
     enabled: true
 
 # 频道图标（台标）库：按地域子目录人工归档，匹配时递归全目录、模糊匹配
-# base_url: /api/epg 返回 icon 的域名前缀；留空按访问 Host 自动生成
+# base_url: /api/epg 返回 icon 的域名前缀；留空按访问 Host 自动生成。
+# 注意：配置后才会启用昨/今/明三天的 /api/epg 响应热缓存预热（icon 地址
+# 不依赖请求 Host 才能预生成；预热时机：同步完成后 5 分钟、每天 00:05）
 icon:
   dir: "data/icons"
   base_url: ""

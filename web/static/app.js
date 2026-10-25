@@ -63,31 +63,43 @@ function renderTicks() {
   $("ticks").innerHTML = html.join("");
 }
 
-function renderRows() {
-  const rows = [];
-  for (const ch of state.channels) {
+function channelRowHTML(ch) {
+  const cards = ch.programmes.map((p) => {
+    const s = new Date(p.start).getTime();
+    const e = new Date(p.stop).getTime();
+    const left = ((s - state.dayStart) / 3600000) * HOUR_W;
+    let width = ((e - s) / 3600000) * HOUR_W - 4;
+    if (width < 8) width = 8; // 极短节目保底可点击
+    return `<div class="prog" style="left:${left.toFixed(1)}px;width:${width.toFixed(1)}px"
+      data-name="${esc(ch.name)}" data-start="${s}" data-stop="${e}">
+      <div class="t">${esc(p.title)}</div>
+      <div class="h">${fmtHM(s)}</div>
+    </div>`;
+  }).join("");
+  const logo = ch.icon
+    ? `<img class="logo" src="${esc(ch.icon)}" loading="lazy"
+        onerror="this.style.display='none'">` : "";
+  return `<div class="row">
+    <div class="ch">${logo}<span class="name" title="${esc(ch.name)}">${esc(ch.name)}</span></div>
+    <div class="lane">${cards}</div>
+  </div>`;
+}
+
+// 渐进渲染：流式到达的频道分批追加（避免整页重绘卡顿）
+function appendRows(chs) {
+  const html = [];
+  for (const ch of chs) {
     if (!ch.programmes.length) continue; // 当日无节目的频道不渲染
-    const cards = ch.programmes.map((p) => {
-      const s = new Date(p.start).getTime();
-      const e = new Date(p.stop).getTime();
-      const left = ((s - state.dayStart) / 3600000) * HOUR_W;
-      let width = ((e - s) / 3600000) * HOUR_W - 4;
-      if (width < 8) width = 8; // 极短节目保底可点击
-      return `<div class="prog" style="left:${left.toFixed(1)}px;width:${width.toFixed(1)}px"
-        data-name="${esc(ch.name)}" data-start="${s}" data-stop="${e}">
-        <div class="t">${esc(p.title)}</div>
-        <div class="h">${fmtHM(s)}</div>
-      </div>`;
-    }).join("");
-    const logo = ch.icon
-      ? `<img class="logo" src="${esc(ch.icon)}" loading="lazy"
-          onerror="this.style.display='none'">` : "";
-    rows.push(`<div class="row">
-      <div class="ch">${logo}<span class="name" title="${esc(ch.name)}">${esc(ch.name)}</span></div>
-      <div class="lane">${cards}</div>
-    </div>`);
+    html.push(channelRowHTML(ch));
   }
-  $("rows").innerHTML = rows.join("");
+  if (html.length) $("rows").insertAdjacentHTML("beforeend", html.join(""));
+}
+
+function renderRows() {
+  $("rows").innerHTML = state.channels
+    .filter((c) => c.programmes.length)
+    .map(channelRowHTML)
+    .join("");
 }
 
 function isToday() {
@@ -175,27 +187,56 @@ function bindSearch() {
 
 /* ---------- 数据加载 ---------- */
 
+// 加载时间轴：后端 NDJSON 流式响应（首行 meta，之后每行一个频道），
+// ReadableStream 逐行解析、每 RENDER_BATCH 频道增量渲染一批，无需等全部下载
+const RENDER_BATCH = 200;
+
 async function loadTimeline(date) {
   state.date = date;
   $("dateInput").value = date;
   $("rows").innerHTML = "";
   $("emptyState").hidden = true;
+  state.channels = [];
   try {
-    const data = await api(`/api/timeline?date=${encodeURIComponent(date)}`);
-    state.dayStart = new Date(data.day_start).getTime();
-    state.channels = (data.channels || []).map((c) => ({
-      ...c,
-      programmes: c.programmes || [], // 后端 nil slice 序列化为 null，此处容错
-    }));
-    const withProg = state.channels.filter((c) => c.programmes.length > 0);
+    const res = await fetch(`/api/timeline?date=${encodeURIComponent(date)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let pending = "", batch = [], sawMeta = false;
+    const flushBatch = () => {
+      if (!batch.length) return;
+      state.channels.push(...batch);
+      appendRows(batch); // 渐进追加，首批到达即开始渲染
+      batch = [];
+    };
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      pending += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = pending.indexOf("\n")) >= 0) {
+        const line = pending.slice(0, nl).trim();
+        pending = pending.slice(nl + 1);
+        if (!line) continue;
+        const obj = JSON.parse(line);
+        if (!sawMeta && obj.day_start) { // 首行 meta
+          state.dayStart = new Date(obj.day_start).getTime();
+          sawMeta = true;
+          continue;
+        }
+        obj.programmes = obj.programmes || []; // 后端 nil slice 序列化为 null，此处容错
+        batch.push(obj);
+        if (batch.length >= RENDER_BATCH) flushBatch();
+      }
+    }
+    flushBatch();
     if (state.channels.length === 0) {
       $("emptyHint").textContent = "请确认 EPG 源已配置并完成一次同步";
       $("emptyState").hidden = false;
-    } else if (withProg.length === 0) {
+    } else if (!state.channels.some((c) => c.programmes.length > 0)) {
       $("emptyHint").textContent = `${date} 无节目数据（可能超出保留天数范围）`;
       $("emptyState").hidden = false;
     }
-    renderRows();
     updateNow();
     scrollToNow();
   } catch (err) {

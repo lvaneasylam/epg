@@ -86,20 +86,29 @@ func contentTypeByExt(p string) string {
 
 // iconURL 生成对外图标地址：显式 base_url 优先，否则按请求 Host 动态生成
 // （反代/换域名后自动跟随，无需改配置）。
-// 反代场景优先 X-Forwarded-Host（Caddy 等默认携带）；Nginx 需显式
-// proxy_set_header Host $host 才能让 r.Host 为原始域名。
 func (s *Server) iconURL(r *http.Request, channelName string) string {
 	base := s.cfg.Icon.BaseURL
 	if base == "" {
-		scheme := "http"
-		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
-			scheme = "https"
-		}
-		host := r.Header.Get("X-Forwarded-Host")
-		if host == "" {
-			host = r.Host
-		}
-		base = scheme + "://" + host
+		base = baseFromRequest(r)
 	}
+	return iconJoin(base, channelName)
+}
+
+// baseFromRequest 按请求推断站点基地址：反代优先 X-Forwarded-Host（Caddy 等
+// 默认携带）；Nginx 需显式 proxy_set_header Host $host 才能让 r.Host 为原始域名。
+func baseFromRequest(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	host := r.Header.Get("X-Forwarded-Host")
+	if host == "" {
+		host = r.Host
+	}
+	return scheme + "://" + host
+}
+
+// iconJoin 拼接图标地址（请求路径与预热共用：预热无请求上下文，直接用配置 base_url）。
+func iconJoin(base, channelName string) string {
 	return strings.TrimSuffix(base, "/") + "/icon/" + url.PathEscape(channelName) + ".png"
 }

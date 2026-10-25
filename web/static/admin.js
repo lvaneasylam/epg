@@ -133,6 +133,10 @@ $("refreshIconsBtn").addEventListener("click", async () => {
   try { toast((await api("/icons/refresh", { method: "POST" })).message); }
   catch (err) { toast(err.message); }
 });
+$("warmEpgBtn").addEventListener("click", async () => {
+  try { toast((await api("/warm", { method: "POST" })).message); }
+  catch (err) { toast(err.message); }
+});
 
 let editingId = null;
 function openSourceModal(src) {

@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -37,6 +38,10 @@ type Server struct {
 	// 绑定/解绑后旧缓存立即失效，避免接口返回过期数据。
 	bindVer atomic.Int64
 
+	// warmMu 热缓存预热执行互斥：手动触发（admin）与自动调度共用，
+	// 防止并发预热重复打满数据库与 Redis。
+	warmMu sync.Mutex
+
 	httpServer *http.Server
 }
 
@@ -54,6 +59,9 @@ func New(cfg *config.Config, st *store.Store, sy *syncer.Syncer, ca cache.Cache,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handlePage)
+	// 兼容 PHP 公版 EPG 接口路径：部分播放器配置模板固定请求 /index.php?ch=，
+	// 直接按 DIYP 接口响应（浏览器不会访问该路径，无需 UA 分流）
+	mux.HandleFunc("GET /index.php", s.handleEPG)
 	mux.HandleFunc("GET /admin", s.requireAdmin(s.handleAdminPage))
 	mux.Handle("GET /static/", http.StripPrefix("/static/",
 		http.FileServer(http.FS(web.StaticFS()))))
@@ -78,6 +86,7 @@ func New(cfg *config.Config, st *store.Store, sy *syncer.Syncer, ca cache.Cache,
 	admin.HandleFunc("DELETE /bindings/{name}", s.adminDeleteBinding)
 	admin.HandleFunc("PUT /hidden", s.adminSetHidden)
 	admin.HandleFunc("POST /icons/refresh", s.adminRefreshIcons)
+	admin.HandleFunc("POST /warm", s.adminWarmEPG)
 	mux.Handle("/api/admin/", http.StripPrefix("/api/admin", s.requireAdminHandler(admin)))
 
 	s.httpServer = &http.Server{
@@ -85,6 +94,7 @@ func New(cfg *config.Config, st *store.Store, sy *syncer.Syncer, ca cache.Cache,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	go s.watchEPGWarm() // 昨/今/明响应热缓存：启动即预热，同步/绑定变更/跨天自动刷新
 	return s, nil
 }
 
@@ -168,8 +178,28 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // tz 业务时区。
 func (s *Server) tz() *time.Location { return s.loc }
 
-// handlePage 输出内嵌的节目单页面。
+// playerUAKeywords 播放器 User-Agent 标识（小写包含匹配）：命中则根路径 / 直接按
+// DIYP 接口响应，播放器可将站点根地址直接配置为 EPG 接口（如 APTV 自动追加 ?ch=）。
+var playerUAKeywords = []string{"aptv"}
+
+// isPlayerUA 判断请求是否来自已知播放器（UA 嗅探）。
+func isPlayerUA(ua string) bool {
+	ua = strings.ToLower(ua)
+	for _, k := range playerUAKeywords {
+		if strings.Contains(ua, k) {
+			return true
+		}
+	}
+	return false
+}
+
+// handlePage 输出内嵌的节目单页面；播放器 UA（如 APTV）访问根路径时
+// 直接转交 DIYP 接口处理（/?ch=频道名 即可获取节目单）。
 func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
+	if isPlayerUA(r.UserAgent()) {
+		s.handleEPG(w, r)
+		return
+	}
 	data, err := web.IndexHTML()
 	if err != nil {
 		http.Error(w, "页面资源缺失", http.StatusInternalServerError)

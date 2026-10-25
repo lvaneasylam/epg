@@ -1,9 +1,7 @@
 package server
 
 import (
-	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -15,106 +13,6 @@ import (
 	"goepg/internal/syncer"
 	"goepg/web"
 )
-
-// timelineChannel GET /api/timeline 单频道结构（页面网格渲染用，精简字段省流量）。
-type timelineChannel struct {
-	Name       string              `json:"name"`
-	Icon       string              `json:"icon,omitempty"`
-	Programmes []timelineProgramme `json:"programmes"`
-}
-
-type timelineProgramme struct {
-	Start time.Time `json:"start"`
-	Stop  time.Time `json:"stop"`
-	Title string    `json:"title"`
-}
-
-// handleTimeline GET /api/timeline?date=YYYY-MM-DD
-// 页面数据源：全部去重频道 + 当日节目。
-func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
-	dateStr := strings.TrimSpace(r.URL.Query().Get("date"))
-	if dateStr == "" {
-		dateStr = epgtime.FormatDate(time.Now().In(s.tz()))
-	}
-	day, ok := epgtime.ParseDate(dateStr, s.tz())
-	if !ok {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "date 参数格式应为 YYYY-MM-DD"})
-		return
-	}
-
-	cacheKey := fmt.Sprintf("v%s:epg:timeline:%s", s.dataVersion(), dateStr)
-	if val, hit := s.cache.Get(r.Context(), cacheKey); hit {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("X-Cache", "hit")
-		_, _ = w.Write(val)
-		return
-	}
-
-	all, err := s.store.AllChannels(r.Context())
-	if err != nil {
-		http.Error(w, "数据库查询失败", http.StatusInternalServerError)
-		return
-	}
-	bindings, err := s.store.BindingChannelMap(r.Context())
-	if err != nil {
-		http.Error(w, "数据库查询失败", http.StatusInternalServerError)
-		return
-	}
-	hidden, err := s.store.HiddenSet(r.Context())
-	if err != nil {
-		http.Error(w, "数据库查询失败", http.StatusInternalServerError)
-		return
-	}
-	channels := store.FilterHidden(store.ApplyBindings(all, bindings), hidden)
-	ids := make([]int64, 0, len(channels))
-	byID := make(map[int64]int, len(channels)) // channel_id → out 下标
-	for i, c := range channels {
-		ids = append(ids, c.ID)
-		byID[c.ID] = i
-	}
-
-	progs, err := s.store.ProgrammesBetween(r.Context(), ids, day, day.Add(24*time.Hour), false)
-	if err != nil {
-		http.Error(w, "数据库查询失败", http.StatusInternalServerError)
-		return
-	}
-	out := make([]timelineChannel, len(channels))
-	for i, c := range channels {
-		// 图标统一走本服务 /icon 地址（与 /api/epg 一致，iconlib 模糊匹配，未命中 404 由前端隐藏）
-		out[i] = timelineChannel{Name: c.Name, Icon: s.iconURL(r, c.Name), Programmes: []timelineProgramme{}}
-	}
-	for _, p := range progs {
-		if i, ok := byID[p.ChannelID]; ok {
-			out[i].Programmes = append(out[i].Programmes, timelineProgramme{
-				Start: p.Start, Stop: p.Stop, Title: p.Title,
-			})
-		}
-	}
-	// 当日无节目的频道整行不下发（前端时间轴不渲染空行，同时减小响应体积）
-	kept := make([]timelineChannel, 0, len(out))
-	for _, c := range out {
-		if len(c.Programmes) > 0 {
-			kept = append(kept, c)
-		}
-	}
-	out = kept
-
-	resp := map[string]any{
-		"date":         dateStr,
-		"day_start":    day.Format(time.RFC3339), // 前端网格定位基准，避免浏览器时区推算
-		"generated_at": time.Now().In(s.tz()).Format(time.RFC3339),
-		"count":        len(out),
-		"channels":     out,
-	}
-	var buf bytes.Buffer
-	_ = json.NewEncoder(&buf).Encode(resp)
-	body := buf.Bytes()
-
-	s.cache.Set(r.Context(), cacheKey, body, s.cfg.Redis.CacheTTL)
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("X-Cache", "miss")
-	_, _ = w.Write(body)
-}
 
 // statusResponse GET /api/status 响应。
 type statusResponse struct {
@@ -277,7 +175,12 @@ func (s *Server) adminDeleteSource(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"message": "已删除"})
+	// 数据库已级联清理该源频道/节目，但热缓存是删除前的快照且已删频道的
+	// 键不会被预热覆盖：立即清空全部接口缓存，并触发版本变化（5 分钟后
+	// 自动预热重建现存频道）。
+	s.cache.ClearPrefix(r.Context(), "epg:")
+	s.bindVer.Add(1)
+	writeJSON(w, http.StatusOK, map[string]string{"message": "已删除，接口缓存已清空（5 分钟后自动重建）"})
 }
 
 // adminToggleSource POST /api/admin/sources/{id}/toggle  body: {"enabled":bool}
@@ -325,11 +228,11 @@ func (s *Server) adminSyncSource(w http.ResponseWriter, r *http.Request) {
 
 // bindingView 绑定列表视图：对外频道 + 生效来源 + 候选数 + 首页显示状态。
 type bindingView struct {
-	ChannelName      string     `json:"channel_name"`      // 对外频道名
-	Mode             string     `json:"mode"`              // auto / manual
-	TargetName       string     `json:"target_name"`       // 生效频道显示名
-	TargetSource     string     `json:"target_source"`     // 生效来源
-	Candidates       int        `json:"candidates"`        // 跨源同名频道数（备用源数）
+	ChannelName      string     `json:"channel_name"`       // 对外频道名
+	Mode             string     `json:"mode"`               // auto / manual
+	TargetName       string     `json:"target_name"`        // 生效频道显示名
+	TargetSource     string     `json:"target_source"`      // 生效来源
+	Candidates       int        `json:"candidates"`         // 跨源同名频道数（备用源数）
 	ChannelUpdatedAt *time.Time `json:"channel_updated_at"` // 生效频道行的更新时间（所属源最近同步）
 	Hidden           bool       `json:"hidden"`             // 是否隐藏（不在首页时间轴显示）
 	UpdatedAt        *time.Time `json:"updated_at,omitempty"`
@@ -525,6 +428,25 @@ func (s *Server) adminRefreshIcons(w http.ResponseWriter, r *http.Request) {
 	s.icons.Refresh()
 	s.publishIconIndex() // 索引重建后同步刷新 Redis 共享副本
 	writeJSON(w, http.StatusOK, map[string]string{"message": "图标索引已刷新"})
+}
+
+// adminWarmEPG POST /api/admin/warm 手动触发 /api/epg 热缓存预热。
+// 先清空全部接口缓存再预热（彻底刷新：清掉已删频道等孤儿键）；
+// 自动调度（同步完成后 5 分钟与每天 00:05）为覆盖式，不清。
+func (s *Server) adminWarmEPG(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Icon.BaseURL == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "未配置 icon.base_url，无法预热（icon 地址依赖请求 Host，无法预生成）"})
+		return
+	}
+	// 先同步清空（数千键约 1 秒），再启动预热重建——顺序不能反，
+	// 否则会清掉预热刚写入的新键
+	s.cache.ClearPrefix(r.Context(), "epg:")
+	if !s.tryWarmEPG() {
+		writeJSON(w, http.StatusConflict, map[string]string{"message": "缓存已清空，预热正在进行中，请稍候"})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"message": "已清空接口缓存并开始预热（昨/今/明三天全频道）"})
 }
 
 // handleAdminPage GET /admin 管理页面。
