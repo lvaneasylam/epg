@@ -198,7 +198,8 @@ async function loadTimeline(date) {
   $("emptyState").hidden = true;
   state.channels = [];
   try {
-    const res = await fetch(`/api/timeline?date=${encodeURIComponent(date)}`);
+    // 时间戳破缓存：绕过浏览器 3 分钟本地缓存，始终取服务端最新数据
+    const res = await fetch(`/api/timeline?date=${encodeURIComponent(date)}&_t=${Date.now()}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const reader = res.body.getReader();
     const dec = new TextDecoder();
