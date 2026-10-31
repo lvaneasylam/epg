@@ -288,16 +288,13 @@ body {
   padding: 0 10px; font-size: 12px; width: 200px; font-family: inherit;
 }
 .icon-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 12px; max-height: 56vh; overflow-y: auto; padding: 2px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(126px, 1fr));
+  gap: 10px; max-height: 56vh; overflow-y: auto; padding: 2px;
 }
 .icon-card .btn.mini { padding: 0 11px; }
-/* 三个操作按钮强制单行水平平铺，空间不足也不换行/不压缩 */
-.icon-card .ic-ops { flex-wrap: nowrap; }
-.icon-card .ic-ops .btn { white-space: nowrap; flex-shrink: 0; }
-.icon-card img { width: 100%; height: 52px; object-fit: contain; }
+.icon-card img { width: 100%; height: 44px; object-fit: contain; }
 .icon-card {
-  border: 1px solid #ececec; border-radius: 6px; padding: 8px 6px;
+  border: 1px solid #ececec; border-radius: 6px; padding: 6px 5px;
   text-align: center; background: #fff; position: relative;
   transition: background .15s, border-color .15s;
 }
@@ -309,10 +306,10 @@ body {
   height: 2.6em; overflow: hidden; word-break: break-all;
 }
 .ic-ops {
-  display: flex; gap: 4px; justify-content: center; margin-top: 6px;
-  opacity: 0; transition: opacity .15s;
+  /* 四个操作按钮 2x2 等宽布局，卡片 180px 宽下单行放不下 */
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 6px;
 }
-.icon-card:hover .ic-ops { opacity: 1; }
+.ic-ops .btn { width: 100%; text-align: center; }
 .ic-binds {
   display: flex; flex-wrap: wrap; gap: 3px; justify-content: center; margin-top: 4px;
 }

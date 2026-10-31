@@ -276,7 +276,7 @@ func (s *Server) adminListBindings(w http.ResponseWriter, r *http.Request) {
 			TargetSource:     c.Source,
 			Candidates:       len(byName[c.Name]) - 1,
 			ChannelUpdatedAt: &t,
-			Hidden:           hidden[c.Name],
+			Hidden:           hidden[strings.ToLower(c.Name)],
 		}
 		if b, ok := manual[c.Name]; ok {
 			v.Mode = "manual"

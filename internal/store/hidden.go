@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -10,7 +11,9 @@ import (
 // 属持久化配置，存 MySQL 而非 cache（Redis 为可选组件且语义为可丢失缓存）。
 // 频道从源中消失时记录保留，频道回归后隐藏依然生效。
 
-// HiddenSet 读取全部隐藏频道名。
+// HiddenSet 读取全部隐藏频道名。键小写化：表 collation 为
+// utf8mb4_general_ci（主键层不区分大小写），Go 侧比较须同语义，
+// 否则「MOMO亲子台」的隐藏记录对「momo亲子台」频道失效。
 func (s *Store) HiddenSet(ctx context.Context) (map[string]bool, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT channel_name FROM epg_hidden_channels`)
 	if err != nil {
@@ -23,7 +26,7 @@ func (s *Store) HiddenSet(ctx context.Context) (map[string]bool, error) {
 		if err := rows.Scan(&name); err != nil {
 			return nil, err
 		}
-		out[name] = true
+		out[strings.ToLower(name)] = true
 	}
 	return out, rows.Err()
 }

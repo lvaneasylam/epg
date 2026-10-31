@@ -1,6 +1,8 @@
 package store
 
 import (
+	"strings"
+
 	"context"
 	"database/sql"
 	"time"
@@ -67,7 +69,8 @@ func ApplyBindings(all []Channel, bindings BindingMap) []Channel {
 	return out
 }
 
-// FilterHidden 过滤隐藏频道（首页时间轴用）：hidden 为名字黑名单。
+// FilterHidden 过滤隐藏频道（首页时间轴用）：hidden 为名字黑名单
+// （HiddenSet 已小写化，此处比较同语义——对齐表 collation 的大小写不敏感）。
 // 名单按对外频道名键控，频道从源中临时消失时保留设置，频道回归后依然生效。
 func FilterHidden(channels []Channel, hidden map[string]bool) []Channel {
 	if len(hidden) == 0 {
@@ -75,7 +78,7 @@ func FilterHidden(channels []Channel, hidden map[string]bool) []Channel {
 	}
 	out := make([]Channel, 0, len(channels))
 	for _, c := range channels {
-		if !hidden[c.Name] {
+		if !hidden[strings.ToLower(c.Name)] {
 			out = append(out, c)
 		}
 	}

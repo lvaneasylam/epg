@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"goepg/internal/config"
+	"goepg/internal/t2s"
 	"goepg/internal/epgtime"
 	"goepg/internal/store"
 	"goepg/internal/xmltv"
@@ -295,7 +296,10 @@ func (s *Syncer) doSyncOne(ctx context.Context, src store.SourceRow) error {
 	seenName := make(map[string]bool, len(channels))
 	skippedDup := 0
 	for _, c := range channels {
-		norm := normalizeChName(c.Name)
+		// 频道名统一转简体入库：繁简并存会导致同一频道对外重复
+		//（如「衛視中文台 / 卫视中文台」两条记录），转换后再归一去重。
+		name := t2s.Convert(c.Name)
+		norm := normalizeChName(name)
 		if seenName[norm] {
 			skippedDup++
 			continue
@@ -303,7 +307,7 @@ func (s *Syncer) doSyncOne(ctx context.Context, src store.SourceRow) error {
 		seenName[norm] = true
 		inputs = append(inputs, store.ChannelInput{
 			XmltvID: truncate(c.XmltvID, 128),
-			Name:    truncate(c.Name, 128),
+			Name:    truncate(name, 128),
 			Icon:    truncate(c.Icon, 512),
 		})
 	}

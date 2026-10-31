@@ -42,7 +42,8 @@ func TestFilterHidden(t *testing.T) {
 		t.Errorf("空名单应全部保留: %+v", got)
 	}
 
-	got := FilterHidden(all, map[string]bool{"CCTV-2": true, "不存在": true})
+	// 名单键须小写（HiddenSet 契约：对齐表 collation 大小写不敏感）
+	got := FilterHidden(all, map[string]bool{"cctv-2": true, "不存在": true})
 	if len(got) != 2 || got[0].Name != "CCTV-1" || got[1].Name != "湖南卫视" {
 		t.Errorf("FilterHidden = %+v, want CCTV-1/湖南卫视", got)
 	}

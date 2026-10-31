@@ -413,6 +413,7 @@ function renderIconGrid() {
         ${binds.length ? `<div class="ic-binds">${binds.map((b) =>
           `<span class="ic-chip" data-unbind="${esc(b.channel_name)}" title="点击解除「${esc(b.channel_name)}」的绑定">${esc(b.channel_name)}</span>`).join("")}</div>` : ""}
         <div class="ic-ops">
+          <button class="btn ghost mini" data-copy="${esc(f.path)}" title="复制对外图标直链（/icon/名字）">复制</button>
           <button class="btn ghost mini" data-replace="${esc(f.path)}" title="用新图片覆盖此图标">替换</button>
           <button class="btn ghost mini" data-bind="${esc(f.path)}">绑定</button>
           <button class="btn danger mini" data-del="${esc(f.path)}">删除</button>
@@ -567,6 +568,19 @@ $("iconMkdirBtn").addEventListener("click", async () => {
 let iconBindTarget = ""; // 绑定弹窗当前操作的图标路径
 
 $("iconGrid").addEventListener("click", async (e) => {
+  // 复制对外直链 /icon/{文件名去后缀}（不带 token，可安全外发）
+  const copy = e.target.closest("[data-copy]");
+  if (copy) {
+    const name = copy.dataset.copy.split("/").pop().replace(/\.[^.]+$/, "");
+    const url = `${location.origin}/icon/${encodeURIComponent(name)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast("已复制：" + url);
+    } catch {
+      prompt("浏览器拒绝了剪贴板权限，请手动复制：", url);
+    }
+    return;
+  }
   const chip = e.target.closest("[data-unbind]");
   if (chip) {
     const ch = chip.dataset.unbind;

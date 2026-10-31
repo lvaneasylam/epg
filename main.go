@@ -40,6 +40,7 @@ func main() {
 	if err := st.Migrate(); err != nil {
 		log.Fatalf("[main] %v", err)
 	}
+	st.MigrateNamesToSimplified(context.Background()) // 配置表繁体频道名转简体（幂等，失败告警不阻断）
 	log.Printf("[main] 数据库就绪（MySQL 5.6 兼容模式）")
 
 	ca := cache.New(cfg.Redis)

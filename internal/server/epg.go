@@ -16,6 +16,7 @@ import (
 
 	"goepg/internal/epgtime"
 	"goepg/internal/store"
+	"goepg/internal/t2s"
 )
 
 // epgResponse GET /api/epg 的响应结构。
@@ -115,7 +116,9 @@ func buildEPGBody(chName, dateStr, icon string, progs []store.Programme,
 //     避免播放器无参探测拿到错误 JSON）
 //   - 频道查找顺序：手动绑定 → 名字精确（不区分大小写）→ xmltv_id 匹配
 func (s *Server) handleEPG(w http.ResponseWriter, r *http.Request) {
-	ch := strings.TrimSpace(r.URL.Query().Get("ch"))
+	// 查询名统一转简体：频道名入库已统一简体，繁体输入（如「衛視中文台」）
+	// 转换后即可命中；缓存键基于转换后的 ch，繁简输入共享同一条目
+	ch := t2s.Convert(strings.TrimSpace(r.URL.Query().Get("ch")))
 	dateStr := strings.TrimSpace(r.URL.Query().Get("date"))
 	day, ok := epgtime.ParseDate(dateStr, s.tz())
 	if !ok {

@@ -1,6 +1,10 @@
 package syncer
 
-import "testing"
+import (
+	"testing"
+
+	"goepg/internal/t2s"
+)
 
 func TestIsJunkTitle(t *testing.T) {
 	junk := []string{
@@ -66,5 +70,23 @@ func TestNormalizeChName(t *testing.T) {
 	// 空白删除属比较键设计（"cctv 1" 与 "cctv1" 同键），但 HD 不得被删
 	if got := normalizeChName("CHILDHOOD CHANNEL"); got != "childhoodchannel" {
 		t.Errorf("单词内部 HD 被误删: %q", got)
+	}
+}
+
+// 入库链路行为锁定：频道名先繁转简再归一，繁简并存（含分辨率后缀）
+// 必须得到同一去重键 —— 这是「频道名统一简体」需求的核心行为。
+func TestConvertThenNormalizeDedup(t *testing.T) {
+	groups := [][]string{
+		{"衛視中文台", "卫视中文台", "衛視中文台 HD"},
+		{"鳳凰衛視", "凤凰卫视", "鳳凰衛視高清"},
+		{"澳洲公廣頻道", "澳洲公广频道"},
+	}
+	for _, g := range groups {
+		first := normalizeChName(t2s.Convert(g[0]))
+		for _, s := range g[1:] {
+			if got := normalizeChName(t2s.Convert(s)); got != first {
+				t.Errorf("%q 转简归一为 %q，应与 %q（键 %q）一致", s, got, g[0], first)
+			}
+		}
 	}
 }
