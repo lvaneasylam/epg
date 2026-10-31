@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"goepg/internal/config"
 	"goepg/internal/epgtime"
@@ -288,8 +289,18 @@ func (s *Syncer) doSyncOne(ctx context.Context, src store.SourceRow) error {
 	if len(channels) == 0 {
 		return fmt.Errorf("源数据中未找到任何频道")
 	}
+	// 同源内按归一化频道名去重：源里同时存在 "CCTV1" 与 "CCTV1 高清" 这类
+	// 仅分辨率标记不同的频道时，保留先出现的（分辨率不影响节目内容）
 	inputs := make([]store.ChannelInput, 0, len(channels))
+	seenName := make(map[string]bool, len(channels))
+	skippedDup := 0
 	for _, c := range channels {
+		norm := normalizeChName(c.Name)
+		if seenName[norm] {
+			skippedDup++
+			continue
+		}
+		seenName[norm] = true
 		inputs = append(inputs, store.ChannelInput{
 			XmltvID: truncate(c.XmltvID, 128),
 			Name:    truncate(c.Name, 128),
@@ -314,6 +325,7 @@ func (s *Syncer) doSyncOne(ctx context.Context, src store.SourceRow) error {
 	defer r2.Close()
 
 	progCount := 0
+	hasProg := make(map[int64]bool, len(chMap)) // 本次同步实际写入过节目的频道
 	batch := make([]store.Programme, 0, 500)
 	flush := func() error {
 		if len(batch) == 0 {
@@ -351,6 +363,7 @@ func (s *Syncer) doSyncOne(ctx context.Context, src store.SourceRow) error {
 			Descr:     truncate(pi.Descr, 60000),
 			Category:  truncate(pi.Category, 128),
 		})
+		hasProg[chID] = true
 		if len(batch) >= 500 {
 			return flush()
 		}
@@ -363,12 +376,27 @@ func (s *Syncer) doSyncOne(ctx context.Context, src store.SourceRow) error {
 		return err
 	}
 
-	log.Printf("[syncer] 源 %s 同步完成: %d 字节(原始), %d 频道, %d 节目, 耗时 %s",
-		src.Name, size, len(chMap), progCount, time.Since(begin).Round(time.Second))
+	// 删除本次同步零节目的频道：源里声明了但没有节目数据的频道没有价值，
+	// 不删除会以空频道形式出现在前台
+	empty := make([]int64, 0)
+	for _, id := range chMap {
+		if !hasProg[id] {
+			empty = append(empty, id)
+		}
+	}
+	if len(empty) > 0 {
+		if err := s.store.DeleteChannels(ctx, empty); err != nil {
+			return fmt.Errorf("清理无节目频道失败: %w", err)
+		}
+	}
+
+	log.Printf("[syncer] 源 %s 同步完成: %d 字节(原始), %d 频道(同名跳过 %d, 清理无节目 %d), %d 节目, 耗时 %s",
+		src.Name, size, len(chMap)-len(empty), skippedDup, len(empty), progCount,
+		time.Since(begin).Round(time.Second))
 
 	s.mu.Lock()
 	if st := s.status[src.Name]; st != nil {
-		st.ChannelCount = len(chMap)
+		st.ChannelCount = len(chMap) - len(empty)
 		st.ProgramCount = progCount
 	}
 	s.mu.Unlock()
@@ -436,6 +464,69 @@ func isJunkTitle(title string) bool {
 		}
 	}
 	return false
+}
+
+// resolutionWords 频道名中的分辨率标记词（简繁体）：分辨率不影响节目内容，
+// 去掉后同名视为同一频道。长词在前，先删 "全高清" 才不会残留 "全"。
+var resolutionWords = []string{
+	"全高清", "超高清", "標清", "标清", "超清", "高清",
+	"FHD", "UHD", "HD", "SD", "4K", "8K",
+}
+
+// normalizeChName 频道名归一化（仅作同源去重的比较键，不改动入库原名）：
+// 先删分辨率标记词再删空白（顺序不能反，否则 "tvN HD" 的 HD 会因
+// 紧邻字母被当作单词内部），最后去残留首尾分隔符并统一小写。
+// "CCTV1 高清"、"CCTV1高清"、"tvN HD" 分别归一为 "cctv1"、"tvn"。
+func normalizeChName(name string) string {
+	s := name
+	for _, w := range resolutionWords {
+		s = removeWord(s, w)
+	}
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, s)
+	return strings.Trim(strings.ToLower(s), "-_·")
+}
+
+// removeWord 删除 s 中所有出现的 word（大小写不敏感），仅当 word 前后
+// 紧邻的都不是 ASCII 字母时才删：防误伤 CHILDHOOD 等单词内部的 HD；
+// 数字不受限（CCTV1HD 的 HD 是分辨率标记，应删）。
+func removeWord(s, word string) string {
+	lw := strings.ToLower(word)
+	lower := strings.ToLower(s)
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		j := strings.Index(lower[i:], lw)
+		if j < 0 {
+			b.WriteString(s[i:])
+			break
+		}
+		abs := i + j
+		end := abs + len(lw)
+		prev, next := byte(0), byte(0)
+		if abs > 0 {
+			prev = lower[abs-1]
+		}
+		if end < len(lower) {
+			next = lower[end]
+		}
+		if isASCIILetter(prev) || isASCIILetter(next) {
+			b.WriteString(s[i:end]) // 非独立词，原样保留
+		} else {
+			b.WriteString(s[i:abs])
+		}
+		i = end
+	}
+	return b.String()
+}
+
+// isASCIILetter 判断是否 ASCII 字母。
+func isASCIILetter(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
 
 // truncate 按 rune 截断字符串，保证不切坏 UTF-8 且不超出列宽。

@@ -119,6 +119,13 @@ func (s *Store) Migrate() error {
   created_at   DATETIME     NOT NULL,
   PRIMARY KEY (channel_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+		`CREATE TABLE IF NOT EXISTS epg_icon_bindings (
+  channel_name VARCHAR(128) NOT NULL COMMENT '对外频道名（查询键）',
+  icon_path    VARCHAR(255) NOT NULL COMMENT '图标相对路径，相对 icon 目录（斜杠分隔）',
+  created_at   DATETIME     NOT NULL,
+  updated_at   DATETIME     NOT NULL,
+  PRIMARY KEY (channel_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 	}
 	for _, ddl := range schema {
 		if _, err := s.db.Exec(ddl); err != nil {

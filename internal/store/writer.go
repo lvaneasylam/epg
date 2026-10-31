@@ -104,14 +104,15 @@ func (s *Store) ReplaceSourceChannels(ctx context.Context, source string, priori
 			vanishedIDs = append(vanishedIDs, e.id)
 		}
 	}
-	if err := s.deleteChannelsByID(ctx, vanishedIDs); err != nil {
+	if err := s.DeleteChannels(ctx, vanishedIDs); err != nil {
 		return nil, fmt.Errorf("清理源 %s 消失频道失败: %w", source, err)
 	}
 	return m, nil
 }
 
-// deleteChannelsByID 删除频道行及其全部节目（id 分批）。
-func (s *Store) deleteChannelsByID(ctx context.Context, ids []int64) error {
+// DeleteChannels 删除频道行及其全部节目（id 分批）。除源内消失频道的
+// 差量清理外，也供同步层删除零节目频道。
+func (s *Store) DeleteChannels(ctx context.Context, ids []int64) error {
 	const batch = 500
 	for start := 0; start < len(ids); start += batch {
 		end := min(start+batch, len(ids))
