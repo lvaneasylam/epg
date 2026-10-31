@@ -17,6 +17,9 @@ var defaultGroups = []string{
 	"港澳", "台湾", "国际", "网络", "其他",
 }
 
+// GroupOrder 预建分类目录顺序（供目录树按业务顺序优先排序展示）。
+func GroupOrder() []string { return defaultGroups }
+
 // Library 图标库索引。
 type Library struct {
 	dir string

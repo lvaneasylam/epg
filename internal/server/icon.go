@@ -37,8 +37,49 @@ func (s *Server) publishIconIndex() {
 	}
 }
 
+// iconBind 频道图标绑定的内存视图：原频道名为 MySQL 主键（清理脏绑定时
+// 需要反查删除），Path 为相对图标库根的斜杠路径（与库内一致）。
+type iconBind struct {
+	Channel string
+	Path    string
+}
+
+// loadIconBinds 全量加载绑定到内存（启动与绑定变更后调用）。
+// 失败只告警：内存表留空/留旧值，/icon 自动匹配兜底。
+func (s *Server) loadIconBinds() {
+	rows, err := s.store.ListIconBinds(context.Background())
+	if err != nil {
+		log.Printf("[icons] 加载图标绑定失败: %v", err)
+		return
+	}
+	m := make(map[string]iconBind, len(rows))
+	for _, row := range rows {
+		m[iconlib.Norm(row.ChannelName)] = iconBind{Channel: row.ChannelName, Path: row.IconPath}
+	}
+	s.iconBindsMu.Lock()
+	s.iconBinds = m
+	s.iconBindsMu.Unlock()
+}
+
+// boundIcon 按归一化频道名查手动绑定。
+func (s *Server) boundIcon(name string) (iconBind, bool) {
+	s.iconBindsMu.RLock()
+	defer s.iconBindsMu.RUnlock()
+	b, ok := s.iconBinds[iconlib.Norm(name)]
+	return b, ok
+}
+
+// dropIconBind 清理单条绑定（DB + 内存）。
+func (s *Server) dropIconBind(b iconBind) {
+	if err := s.store.DeleteIconBind(context.Background(), b.Channel); err != nil {
+		log.Printf("[icons] 清理脏绑定失败: %v", err)
+	}
+	s.loadIconBinds()
+}
+
 // handleIcon GET /icon/{频道名}[.png]
-// 模糊匹配本地图标库（跨目录），命中输出图片文件；供播放器直连或 /api/epg 的 icon 字段引用。
+// 匹配顺序：手动绑定 → 三级模糊匹配（跨目录），命中输出图片文件；
+// 供播放器直连或 /api/epg 的 icon 字段引用。
 func (s *Server) handleIcon(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	// 兼容 .png/.jpg 等后缀写法：仅作占位美观，匹配按去后缀文件名
@@ -47,11 +88,27 @@ func (s *Server) handleIcon(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// 一级：手动绑定优先；绑定的文件已被删则清掉脏绑定，回退自动匹配
+	if b, ok := s.boundIcon(name); ok {
+		if abs, valid := s.safeIconPath(b.Path); valid {
+			if _, err := os.Stat(abs); err == nil {
+				serveIconFile(w, r, abs)
+				return
+			}
+		}
+		s.dropIconBind(b)
+	}
 	file, ok := s.icons.Match(name)
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
+	serveIconFile(w, r, file)
+}
+
+// serveIconFile 输出图标文件。长缓存：图标默认不变，替换后客户端
+// 最长 1 天过期重取（Last-Modified 变化即拿到新图）。
+func serveIconFile(w http.ResponseWriter, r *http.Request, file string) {
 	f, err := os.Open(file)
 	if err != nil {
 		http.NotFound(w, r)
@@ -63,7 +120,6 @@ func (s *Server) handleIcon(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	// 长缓存：图标不变，匹配变更靠文件名维度
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	w.Header().Set("Content-Type", contentTypeByExt(file))
 	http.ServeContent(w, r, "", fi.ModTime(), f)

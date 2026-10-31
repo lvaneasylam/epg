@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -38,6 +39,11 @@ type Server struct {
 	// 绑定/解绑后旧缓存立即失效，避免接口返回过期数据。
 	bindVer atomic.Int64
 
+	// iconBinds 频道图标手动绑定的内存表（key=归一化频道名），
+	// /icon 热路径 O(1) 直查，写操作全量重载（见 loadIconBinds）。
+	iconBindsMu sync.RWMutex
+	iconBinds   map[string]iconBind
+
 	// warmMu 热缓存预热执行互斥：手动触发（admin）与自动调度共用，
 	// 防止并发预热重复打满数据库与 Redis。
 	warmMu sync.Mutex
@@ -57,6 +63,7 @@ func New(cfg *config.Config, st *store.Store, sy *syncer.Syncer, ca cache.Cache,
 	if err := s.initIconLib(); err != nil {
 		return nil, err
 	}
+	s.loadIconBinds() // 频道图标手动绑定（失败告警不阻断启动）
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handlePage)
 	// 兼容 PHP 公版 EPG 接口路径：部分播放器配置模板固定请求 /index.php?ch=，
@@ -65,6 +72,8 @@ func New(cfg *config.Config, st *store.Store, sy *syncer.Syncer, ca cache.Cache,
 	mux.HandleFunc("GET /admin", s.requireAdmin(s.handleAdminPage))
 	mux.Handle("GET /static/", http.StripPrefix("/static/",
 		http.FileServer(http.FS(web.StaticFS()))))
+	// 部分客户端（电视盒子浏览器等）不解析 HTML link 标签，固定请求根路径图标
+	mux.HandleFunc("GET /favicon.ico", s.handleFavicon)
 	mux.HandleFunc("GET /icon/{name}", s.handleIcon)
 	mux.HandleFunc("GET /api/xml", s.handleXML)
 	mux.HandleFunc("GET /api/epg", s.handleEPG)
@@ -86,6 +95,15 @@ func New(cfg *config.Config, st *store.Store, sy *syncer.Syncer, ca cache.Cache,
 	admin.HandleFunc("DELETE /bindings/{name}", s.adminDeleteBinding)
 	admin.HandleFunc("PUT /hidden", s.adminSetHidden)
 	admin.HandleFunc("POST /icons/refresh", s.adminRefreshIcons)
+	admin.HandleFunc("GET /icons/tree", s.adminIconTree)
+	admin.HandleFunc("GET /icons/raw", s.adminIconRaw)
+	admin.HandleFunc("POST /icons/upload", s.adminIconUpload)
+	admin.HandleFunc("POST /icons/fetch", s.adminIconFetch)
+	admin.HandleFunc("POST /icons/mkdir", s.adminIconMkdir)
+	admin.HandleFunc("DELETE /icons/file", s.adminIconDelete)
+	admin.HandleFunc("GET /icons/binds", s.adminIconBindList)
+	admin.HandleFunc("PUT /icons/binds", s.adminIconBindSet)
+	admin.HandleFunc("DELETE /icons/binds/{channel}", s.adminIconBindDelete)
 	admin.HandleFunc("POST /warm", s.adminWarmEPG)
 	mux.Handle("/api/admin/", http.StripPrefix("/api/admin", s.requireAdminHandler(admin)))
 
@@ -128,8 +146,10 @@ func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // requireAdminHandler 中间件形式的鉴权（包整个 admin mux）。
+// 管理数据实时性强（上传/删除/绑定后立即重取），统一禁用浏览器缓存。
 func (s *Server) requireAdminHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		if !s.checkAdminToken(r) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未授权"})
 			return
@@ -207,6 +227,18 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write(data)
+}
+
+// handleFavicon 从内嵌静态资源输出站点图标（图标极少变化，允许长缓存）。
+func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
+	data, err := fs.ReadFile(web.StaticFS(), "favicon.ico")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/x-icon")
+	w.Header().Set("Cache-Control", "public, max-age=604800")
 	_, _ = w.Write(data)
 }
 

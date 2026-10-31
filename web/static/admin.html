@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>EPG 配置</title>
+  <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
   <link rel="stylesheet" href="/static/admin.css">
 </head>
 <body>
@@ -23,6 +24,7 @@
   <nav class="tabs">
     <button class="tab active" data-tab="sources">EPG 源</button>
     <button class="tab" data-tab="bindings">频道绑定</button>
+    <button class="tab" data-tab="icons">图标库</button>
   </nav>
 
   <!-- EPG 源 -->
@@ -83,6 +85,64 @@
         <tbody id="bindRows"></tbody>
       </table>
       <div class="empty" id="bindEmpty" hidden>暂无频道数据，请先同步至少一个源</div>
+    </div>
+  </section>
+
+  <!-- 图标库 -->
+  <section id="tab-icons" class="tab-panel" hidden>
+    <div class="panel-head">
+      <div class="bind-stats" id="iconStats"></div>
+      <button class="btn ghost" id="iconMkdirBtn">＋ 新建目录</button>
+    </div>
+    <div class="card icon-layout">
+      <aside class="icon-tree" id="iconTree"><div class="empty">加载中…</div></aside>
+      <div class="icon-main">
+        <div class="icon-upload">
+          <div class="iu-left">
+            <label class="iu-label">频道名（即图标文件名，留空则取上传文件名）
+              <input id="iconName" placeholder="如 CCTV-1 / 湖南卫视">
+            </label>
+            <div class="dropzone" id="iconDrop" title="支持一次拖入多个文件，按文件名批量入库">
+              <input type="file" id="iconFile" accept=".png,.jpg,.jpeg,.webp,.gif" multiple hidden>
+              <div class="dz-replace" id="dzReplace" hidden>
+                替换模式：<b id="dzReplaceName"></b>，拖入 / 选择新图即覆盖
+                <span id="dzReplaceCancel" title="取消替换">✕ 取消</span>
+              </div>
+              <div class="dz-title">拖拽图片到这里，或点击选择文件</div>
+              <div class="dz-sub">png / jpg / webp / gif · 单个 ≤2MB · 同名直接覆盖</div>
+            </div>
+          </div>
+          <div class="iu-right">
+            <label class="iu-label">从 URL 下载导入
+              <input id="iconUrl" placeholder="https://example.com/logo.png">
+            </label>
+            <button class="btn" id="iconFetchBtn" style="width:100%">下载并保存到当前目录</button>
+            <div class="hint" style="margin-top:8px">服务端抓取该地址图片，落到当前选中目录</div>
+          </div>
+        </div>
+        <div class="icon-grid-head">
+          <span id="iconGridTitle" class="hint"></span>
+          <input type="search" id="iconSearch" placeholder="筛选当前目录图标">
+        </div>
+        <div class="icon-grid" id="iconGrid"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 图标绑定频道弹窗 -->
+  <div class="modal-mask" id="iconBindModal" hidden>
+    <div class="modal">
+      <h3>绑定频道</h3>
+      <div class="hint" id="iconBindInfo"></div>
+      <label>频道名（输入自动补全）
+        <input id="iconBindChannel" list="channelNames" placeholder="如 CCTV-1">
+      </label>
+      <datalist id="channelNames"></datalist>
+      <div class="hint" style="margin-top:8px">绑定后该频道优先使用此图标，不再按文件名自动匹配</div>
+      <div class="modal-actions">
+        <button class="btn ghost" data-close>取消</button>
+        <button class="btn" id="iconBindSaveBtn">绑定</button>
+      </div>
     </div>
   </section>
 
