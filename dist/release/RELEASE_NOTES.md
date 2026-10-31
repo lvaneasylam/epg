@@ -1,26 +1,30 @@
-## goepg v1.0.7
+## goepg v1.0.10
 
 ### 更新
 
-- 限制首页使用缓存：页面请求加时间戳参数，始终获取服务端最新数据
-- 提高响应速度 50%
+- 新增频道图标库在线管理（管理页「图标库」页签）：
+  - 目录树浏览、新建分类目录，图标缩略图网格与筛选
+  - 拖拽 / 选文件批量上传（png/jpg/webp/gif，单个 ≤2MB，按图片真实格式校验），同目录同名直接覆盖
+  - URL 在线导入：服务端抓取远端图片落盘，名字留空自动取地址末段
+  - 图标替换：旧文件自动删除，频道绑定迁移到新路径
+  - 频道图标手动绑定 / 解绑，优先于自动模糊匹配
+- 图标库整理：名字含「卫视」的台标统一归入「卫视」目录（89 个文件），目录仅用于分类管理，跨目录匹配不受影响
+- 管理页图标卡片 hover 显示浅灰底色，白底台标边界清晰可辨
 
 ### 升级方式
 
 ```bash
-tar -xzf goepg_v1.0.7_linux_amd64.tar.gz
-# config.yaml 需包含（v1.0.6 起的热缓存前提，已配置则跳过）：
-#   icon:
-#     dir: "data/icons"
-#     base_url: "https://epg.c-hiang.cn"
+tar -xzf goepg_v1.0.10_linux_amd64.tar.gz
 ./goepg -c config.yaml
 ```
+
+若生产图标目录随仓库同步，更新后调 `POST /api/admin/icons/refresh`（或重启服务）即可按磁盘整表刷新 Redis 图标索引。
 
 ### 下载说明
 
 | 文件 | 适用 |
 |---|---|
-| `goepg_v1.0.7_linux_amd64.tar.gz` | x86_64 服务器（常用） |
-| `goepg_v1.0.7_linux_arm64.tar.gz` | ARM 服务器 / NAS |
+| `goepg_v1.0.10_linux_amd64.tar.gz` | x86_64 服务器（常用） |
+| `goepg_v1.0.10_linux_arm64.tar.gz` | ARM 服务器 / NAS |
 
 压缩包内含 `goepg` 二进制与 `config.example.yaml`；完整性校验见 `SHA256SUMS`。
