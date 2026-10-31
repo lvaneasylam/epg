@@ -1,6 +1,10 @@
-## goepg v1.0.11
+## goepg v1.0.12
 
 ### 更新
+
+- 修复管理页静态资源缓存不更新：`/static/` 无缓存策略且内嵌资源无
+  修改时间，浏览器长期持有旧版 CSS/JS，升级二进制后图标库新样式
+  （2×2 按钮、复制按钮、卡片缩窄）不生效；现改为 no-cache 每次回源校验
 
 - 频道名统一简体（繁简并存导致同一频道对外重复、繁体查询无法命中）：
   - 新增内置繁→简字级映射（3751 单字对，零外部依赖），入库时频道名自动转简体，繁简重复频道随同步自然合并
@@ -15,7 +19,7 @@
 ### 升级方式
 
 ```bash
-tar -xzf goepg_v1.0.11_linux_amd64.tar.gz
+tar -xzf goepg_v1.0.12_linux_amd64.tar.gz
 ./goepg -c config.yaml
 ```
 
@@ -25,7 +29,7 @@ tar -xzf goepg_v1.0.11_linux_amd64.tar.gz
 
 | 文件 | 适用 |
 |---|---|
-| `goepg_v1.0.11_linux_amd64.tar.gz` | x86_64 服务器（常用） |
-| `goepg_v1.0.11_linux_arm64.tar.gz` | ARM 服务器 / NAS |
+| `goepg_v1.0.12_linux_amd64.tar.gz` | x86_64 服务器（常用） |
+| `goepg_v1.0.12_linux_arm64.tar.gz` | ARM 服务器 / NAS |
 
 压缩包内含 `goepg` 二进制与 `config.example.yaml`；完整性校验见 `SHA256SUMS`。

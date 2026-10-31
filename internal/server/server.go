@@ -70,8 +70,11 @@ func New(cfg *config.Config, st *store.Store, sy *syncer.Syncer, ca cache.Cache,
 	// 直接按 DIYP 接口响应（浏览器不会访问该路径，无需 UA 分流）
 	mux.HandleFunc("GET /index.php", s.handleEPG)
 	mux.HandleFunc("GET /admin", s.requireAdmin(s.handleAdminPage))
-	mux.Handle("GET /static/", http.StripPrefix("/static/",
-		http.FileServer(http.FS(web.StaticFS()))))
+	// 静态资源 no-cache：embed FS 无真实 mtime，FileServer 发不出
+	// Last-Modified 验证器，浏览器将按启发式缓存长期持有旧版 CSS/JS，
+	// 升级二进制后页面样式不更新（须每次回源协商）
+	mux.Handle("GET /static/", noCacheStatic(http.StripPrefix("/static/",
+		http.FileServer(http.FS(web.StaticFS())))))
 	// 部分客户端（电视盒子浏览器等）不解析 HTML link 标签，固定请求根路径图标
 	mux.HandleFunc("GET /favicon.ico", s.handleFavicon)
 	mux.HandleFunc("GET /icon/{name}", s.handleIcon)
@@ -228,6 +231,15 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(data)
+}
+
+// noCacheStatic 给静态资源响应加 no-cache：浏览器可缓存但使用前须回源
+// 校验，保证二进制升级（内嵌资源已变）后客户端立即拿到新版。
+func noCacheStatic(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		h.ServeHTTP(w, r)
+	})
 }
 
 // handleFavicon 从内嵌静态资源输出站点图标（图标极少变化，允许长缓存）。
