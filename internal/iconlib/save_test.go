@@ -93,3 +93,84 @@ func TestSaveIcon(t *testing.T) {
 		t.Error("超过大小上限应被拒绝")
 	}
 }
+
+func TestMoveIcon(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{"其他", "卫视", "广东"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(rel string, head []byte) {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), head, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exists := func(rel string) bool {
+		_, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel)))
+		return err == nil
+	}
+	read := func(rel string) string {
+		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+
+	// 纯移动：文件名不变，源消失目标出现
+	write("其他/翡翠台.webp", webpHead)
+	newRel, covered, err := MoveIcon(root, "其他/翡翠台.webp", "广东")
+	if err != nil || newRel != "广东/翡翠台.webp" || covered != "" {
+		t.Fatalf("MoveIcon = %q, %q, %v", newRel, covered, err)
+	}
+	if exists("其他/翡翠台.webp") || !exists("广东/翡翠台.webp") {
+		t.Fatal("移动后源文件应消失、目标文件应存在")
+	}
+
+	// 同名同扩展名：rename 直接覆盖，coveredRel 为空（新旧路径一致，绑定无需迁移）
+	marked := append(append([]byte{}, pngHead...), 0xEE) // 内容标记：覆盖后应可读回
+	write("卫视/湖南卫视.png", pngHead)
+	write("其他/湖南卫视.png", marked)
+	newRel, covered, err = MoveIcon(root, "其他/湖南卫视.png", "卫视")
+	if err != nil || newRel != "卫视/湖南卫视.png" || covered != "" {
+		t.Fatalf("同名同 ext MoveIcon = %q, %q, %v", newRel, covered, err)
+	}
+	if exists("其他/湖南卫视.png") {
+		t.Error("覆盖移动后源文件应消失")
+	}
+	if got := read("卫视/湖南卫视.png"); got != string(marked) {
+		t.Errorf("目标文件应为源内容，实际 %q", got)
+	}
+
+	// 同名不同扩展名：删除目标旧文件，coveredRel 返回其路径供调用方迁移绑定
+	write("广东/深圳卫视.png", pngHead)
+	write("其他/深圳卫视.jpg", jpgHead)
+	newRel, covered, err = MoveIcon(root, "其他/深圳卫视.jpg", "广东")
+	if err != nil || newRel != "广东/深圳卫视.jpg" || covered != "广东/深圳卫视.png" {
+		t.Fatalf("同名不同 ext MoveIcon = %q, %q, %v", newRel, covered, err)
+	}
+	if exists("广东/深圳卫视.png") || !exists("广东/深圳卫视.jpg") {
+		t.Error("旧扩展名文件应被删除、新文件应存在")
+	}
+
+	// 根目录散文件也可整理进分组
+	write("散图.png", pngHead)
+	if newRel, _, err = MoveIcon(root, "散图.png", "其他"); err != nil || newRel != "其他/散图.png" {
+		t.Fatalf("根目录散文件移动 = %q, %v", newRel, err)
+	}
+
+	// 拒绝：移动到所在目录 / 目标目录不存在 / 源文件不存在 / 非法目录名
+	if _, _, err := MoveIcon(root, "广东/翡翠台.webp", "广东"); err == nil {
+		t.Error("移动到所在目录应报错")
+	}
+	if _, _, err := MoveIcon(root, "广东/翡翠台.webp", "不存在的目录"); err == nil {
+		t.Error("目标目录不存在应报错")
+	}
+	if _, _, err := MoveIcon(root, "广东/没有.png", "其他"); err == nil {
+		t.Error("源文件不存在应报错")
+	}
+	if _, _, err := MoveIcon(root, "广东/翡翠台.webp", "../逃逸"); err == nil {
+		t.Error("非法目录名应报错")
+	}
+}

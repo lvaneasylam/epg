@@ -102,6 +102,7 @@ func New(cfg *config.Config, st *store.Store, sy *syncer.Syncer, ca cache.Cache,
 	admin.HandleFunc("GET /icons/raw", s.adminIconRaw)
 	admin.HandleFunc("POST /icons/upload", s.adminIconUpload)
 	admin.HandleFunc("POST /icons/fetch", s.adminIconFetch)
+	admin.HandleFunc("POST /icons/move", s.adminIconMove)
 	admin.HandleFunc("POST /icons/mkdir", s.adminIconMkdir)
 	admin.HandleFunc("DELETE /icons/file", s.adminIconDelete)
 	admin.HandleFunc("GET /icons/binds", s.adminIconBindList)

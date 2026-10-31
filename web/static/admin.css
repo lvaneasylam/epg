@@ -248,8 +248,10 @@ body {
 }
 .it-item:hover { background: #f5faff; }
 .it-item.active { background: #e8f3ff; color: #1e80ff; font-weight: 600; }
+.it-item.drag-over { background: #fff7e6; outline: 2px dashed #fa8c16; outline-offset: -2px; }
 .it-item .cnt { color: #bfbfbf; font-size: 11px; margin-left: 6px; }
 .it-item.active .cnt { color: #7db4ff; }
+.icon-card.dragging { opacity: .4; }
 
 .icon-main { flex: 1; min-width: 0; padding: 14px 16px; }
 .icon-upload { display: flex; gap: 16px; }

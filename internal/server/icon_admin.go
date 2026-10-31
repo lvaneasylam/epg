@@ -215,6 +215,50 @@ func (s *Server) saveIcon(w http.ResponseWriter, r *http.Request, dir, name, old
 	writeJSON(w, http.StatusOK, map[string]string{"path": rel, "message": msg})
 }
 
+// iconMovePayload 图标移动请求体。
+type iconMovePayload struct {
+	Path string `json:"path"` // 源文件相对路径（斜杠分隔）
+	Dir  string `json:"dir"`  // 目标分组目录名
+}
+
+// adminIconMove POST /api/admin/icons/move  body: {path,dir}
+// 把图标移动到另一分组目录（拖拽整理错误分组）。目标同名图标按
+// 上传同规则覆盖，源/被覆盖文件上的频道绑定迁移到新路径。
+func (s *Server) adminIconMove(w http.ResponseWriter, r *http.Request) {
+	var p iconMovePayload
+	if err := decodeJSONBody(r, &p); err != nil || p.Path == "" || p.Dir == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "参数不完整"})
+		return
+	}
+	rel := path.Clean(p.Path)
+	if _, ok := s.safeIconPath(rel); !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "路径不合法"})
+		return
+	}
+	newRel, coveredRel, err := iconlib.MoveIcon(s.cfg.Icon.Dir, rel, p.Dir)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	// 源路径与被覆盖文件路径上的绑定都改指新路径；失败仅告警
+	// （脏绑定在 /icon 命中时自愈回退自动匹配，与替换模式同款容错）
+	for _, old := range []string{rel, coveredRel} {
+		if old == "" || old == newRel {
+			continue
+		}
+		if err := s.store.UpdateIconBindPath(r.Context(), old, newRel); err != nil {
+			log.Printf("[icons] 绑定迁移失败 %s → %s: %v", old, newRel, err)
+		}
+	}
+	s.loadIconBinds()
+	s.afterIconChange()
+	msg := "已移动到 " + p.Dir
+	if coveredRel != "" {
+		msg += "（覆盖了同名图标）"
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"path": newRel, "message": msg})
+}
+
 // adminIconMkdir POST /api/admin/icons/mkdir  body: {"name":"新分类"}
 // 新建一级子目录（如新增省份）。
 func (s *Server) adminIconMkdir(w http.ResponseWriter, r *http.Request) {

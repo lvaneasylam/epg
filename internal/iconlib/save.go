@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -79,4 +80,48 @@ func SaveIcon(root, dir, name string, data []byte) (rel string, replaced bool, e
 		return "", false, err
 	}
 	return rel, replaced, nil
+}
+
+// MoveIcon 把图标文件移动到另一分组目录（文件名与扩展名保持不变），
+// 返回新路径（斜杠分隔）。目标目录存在字面同名（去扩展名）图标时按
+// 上传同规则覆盖：同扩展名 rename 直接覆盖；不同扩展名先删目标旧文件，
+// 其路径经 coveredRel 返回，供调用方迁移频道绑定。
+// srcRel 须为相对 root 的合法斜杠路径（调用方负责防穿越校验）。
+func MoveIcon(root, srcRel, dstDir string) (newRel, coveredRel string, err error) {
+	dstDir = CleanName(dstDir)
+	if dstDir == "" {
+		return "", "", errors.New("目录名不合法")
+	}
+	if fi, err := os.Stat(filepath.Join(root, dstDir)); err != nil || !fi.IsDir() {
+		return "", "", errors.New("目标目录不存在")
+	}
+	if path.Dir(srcRel) == dstDir {
+		return "", "", errors.New("图标已在该目录")
+	}
+	srcAbs := filepath.Join(root, filepath.FromSlash(srcRel))
+	if _, err := os.Stat(srcAbs); err != nil {
+		return "", "", errors.New("源文件不存在")
+	}
+	base := strings.TrimSuffix(path.Base(srcRel), path.Ext(srcRel))
+	srcExt := strings.ToLower(path.Ext(srcRel))
+	for _, e := range []string{".png", ".jpg", ".jpeg", ".webp", ".gif"} {
+		if e == srcExt {
+			continue // 同扩展名：rename 本身即覆盖
+		}
+		cand := dstDir + "/" + base + e
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(cand))); err == nil {
+			coveredRel = cand
+			break
+		}
+	}
+	if coveredRel != "" {
+		if err := os.Remove(filepath.Join(root, filepath.FromSlash(coveredRel))); err != nil {
+			return "", "", err
+		}
+	}
+	newRel = dstDir + "/" + path.Base(srcRel)
+	if err := os.Rename(srcAbs, filepath.Join(root, filepath.FromSlash(newRel))); err != nil {
+		return "", "", err
+	}
+	return newRel, coveredRel, nil
 }

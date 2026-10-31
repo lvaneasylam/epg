@@ -387,6 +387,46 @@ $("iconTree").addEventListener("click", (e) => {
   renderIconGrid();
 });
 
+// 拖拽移动分组：卡片拖到左侧目录项上松手 → 调 move 接口。
+// 自定义 dataTransfer 类型与「拖外部文件上传」区分，互不干扰。
+const DND_ICON = "application/x-icon-path";
+
+$("iconGrid").addEventListener("dragstart", (e) => {
+  const card = e.target.closest(".icon-card");
+  if (!card) return;
+  e.dataTransfer.setData(DND_ICON, card.dataset.path);
+  e.dataTransfer.effectAllowed = "move";
+  card.classList.add("dragging");
+});
+$("iconGrid").addEventListener("dragend", (e) =>
+  e.target.closest(".icon-card")?.classList.remove("dragging"));
+
+$("iconTree").addEventListener("dragover", (e) => {
+  if (!e.dataTransfer.types.includes(DND_ICON)) return; // 外部文件走 iconDrop 上传区
+  const item = e.target.closest("[data-dir]");
+  if (!item) return;
+  e.preventDefault(); // 允许 drop
+  e.dataTransfer.dropEffect = "move";
+  $("iconTree").querySelectorAll(".drag-over").forEach((x) => x.classList.remove("drag-over"));
+  item.classList.add("drag-over");
+});
+["dragleave", "drop"].forEach((ev) =>
+  $("iconTree").addEventListener(ev, () =>
+    $("iconTree").querySelectorAll(".drag-over").forEach((x) => x.classList.remove("drag-over"))));
+
+$("iconTree").addEventListener("drop", async (e) => {
+  const item = e.target.closest("[data-dir]");
+  const path = item && e.dataTransfer.getData(DND_ICON);
+  if (!path) return;
+  e.preventDefault();
+  const dir = item.dataset.dir;
+  if (path.split("/")[0] === dir) { toast(`该图标已在「${dir}」目录`); return; }
+  try {
+    toast((await api("/icons/move", { method: "POST", body: { path, dir } })).message);
+    await loadIcons();
+  } catch (err) { toast(err.message); }
+});
+
 // 缩略图地址：token 随查询串携带（img 标签无法带请求头），v= mtime 绕缓存
 function iconRawURL(f) {
   return `/api/admin/icons/raw?path=${encodeURIComponent(f.path)}` +
@@ -407,7 +447,7 @@ function renderIconGrid() {
     .map((f) => {
       const binds = iconBinds.filter((b) => b.icon_path === f.path);
       return `
-      <div class="icon-card ${f.path === iconFlashPath ? "flash" : ""}" data-path="${esc(f.path)}">
+      <div class="icon-card ${f.path === iconFlashPath ? "flash" : ""}" data-path="${esc(f.path)}" draggable="true" title="拖到左侧目录可移动分组">
         <img loading="lazy" src="${iconRawURL(f)}" alt="">
         <div class="ic-name" title="${esc(f.name)}">${esc(f.name)}</div>
         ${binds.length ? `<div class="ic-binds">${binds.map((b) =>
